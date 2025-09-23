@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>评论洞察 - 配置</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .loading { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto max-w-4xl py-8 px-4">
+        <!-- 头部 -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-900">评论洞察 - 配置</h1>
+                    <p class="text-gray-600 mt-2">配置API密钥和分析参数</p>
+                </div>
+                <div class="flex space-x-2">
+                    <button id="import-btn" class="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700">
+                        导入配置
+                    </button>
+                    <button id="export-btn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                        导出配置
+                    </button>
+                    <button id="save-btn" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
+                        保存配置
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI配置 -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 flex items-center">
+                <span class="bg-blue-100 text-blue-600 p-2 rounded-full mr-3">🤖</span>
+                AI分析配置
+            </h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">API端点</label>
+                    <input type="url" id="ai-endpoint" placeholder="https://api.openai.com/v1" 
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">支持OpenAI兼容的API</p>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">API密钥</label>
+                    <input type="password" id="ai-api-key" placeholder="sk-..." 
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">请确保密钥安全</p>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">模型选择</label>
+                    <div class="flex space-x-2">
+                        <select id="ai-model" class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                            <option value="">请先配置API密钥</option>
+                        </select>
+                        <button id="refresh-models" class="px-4 py-3 bg-gray-200 hover:bg-gray-300 rounded-lg">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">温度值</label>
+                    <input type="range" id="ai-temperature" min="0" max="2" step="0.1" value="0.7" 
+                           class="w-full">
+                    <div class="flex justify-between text-xs text-gray-500">
+                        <span>保守 (0)</span>
+                        <span id="temperature-value" class="font-medium">0.7</span>
+                        <span>创新 (2)</span>
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">最大令牌数</label>
+                    <input type="number" id="ai-max-tokens" value="2000" min="100" max="100000" 
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">系统提示词</label>
+                    <textarea id="ai-system-prompt" rows="3" 
+                              class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              placeholder="你是一个专业的社交媒体评论分析师...">你是一个专业的社交媒体评论分析师。请分析提供的评论数据，生成包含关键洞察、情感分析、主要主题和趋势的结构化摘要。</textarea>
+                </div>
+            </div>
+
+            <div class="mt-4 p-4 bg-blue-50 rounded-lg">
+                <button id="test-ai-btn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                    <span class="test-text">测试AI连接</span>
+                    <span class="test-loading hidden">
+                        <svg class="inline w-4 h-4 loading mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                        </svg>
+                        测试中...
+                    </span>
+                </button>
+                <span id="ai-test-result" class="ml-4 text-sm"></span>
+            </div>
+        </div>
+
+        <!-- 平台配置 -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 flex items-center">
+                <span class="bg-green-100 text-green-600 p-2 rounded-full mr-3">🌐</span>
+                平台配置
+            </h2>
+            
+            <div class="space-y-6">
+                <!-- YouTube -->
+                <div class="border-l-4 border-red-500 pl-4">
+                    <h3 class="font-semibold text-lg flex items-center">
+                        <span class="mr-2">📺</span> YouTube
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">API密钥</label>
+                            <input type="password" id="youtube-api-key" placeholder="YouTube Data API v3密钥" 
+                                   class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-red-500 focus:border-red-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">最大评论数</label>
+                            <input type="number" id="youtube-max-comments" value="100" min="10" max="1000" 
+                                   class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-red-500 focus:border-red-500">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TikTok -->
+                <div class="border-l-4 border-black pl-4">
+                    <h3 class="font-semibold text-lg flex items-center">
+                        <span class="mr-2">🎵</span> TikTok
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">提取模式</label>
+                            <select id="tiktok-mode" class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-black focus:border-black">
+                                <option value="dom">DOM解析 (推荐)</option>
+                                <option value="api">官方API</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">延迟设置(ms)</label>
+                            <input type="number" id="tiktok-delay" value="1000" min="500" max="5000" 
+                                   class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-black focus:border-black">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Instagram -->
+                <div class="border-l-4 border-pink-500 pl-4">
+                    <h3 class="font-semibold text-lg flex items-center">
+                        <span class="mr-2">📷</span> Instagram
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">访问令牌</label>
+                            <input type="password" id="instagram-token" placeholder="Instagram Basic Display API令牌" 
+                                   class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-pink-500 focus:border-pink-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">应用ID</label>
+                            <input type="text" id="instagram-app-id" placeholder="应用程序ID" 
+                                   class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-pink-500 focus:border-pink-500">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Facebook -->
+                <div class="border-l-4 border-blue-600 pl-4">
+                    <h3 class="font-semibold text-lg flex items-center">
+                        <span class="mr-2">👥</span> Facebook
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">应用ID</label>
+                            <input type="text" id="facebook-app-id" placeholder="Facebook应用ID" 
+                                   class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-600 focus:border-blue-600">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">应用密钥</label>
+                            <input type="password" id="facebook-app-secret" placeholder="应用密钥" 
+                                   class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-600 focus:border-blue-600">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Twitter/X -->
+                <div class="border-l-4 border-blue-400 pl-4">
+                    <h3 class="font-semibold text-lg flex items-center">
+                        <span class="mr-2">🐦</span> Twitter/X
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Bearer Token</label>
+                            <input type="password" id="twitter-bearer-token" placeholder="Twitter API v2 Bearer Token" 
+                                   class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-400 focus:border-blue-400">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">API版本</label>
+                            <select id="twitter-api-version" class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-400 focus:border-blue-400">
+                                <option value="v2">v2 (推荐)</option>
+                                <option value="v1.1">v1.1</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 导出设置 -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 flex items-center">
+                <span class="bg-purple-100 text-purple-600 p-2 rounded-full mr-3">📤</span>
+                导出设置
+            </h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">默认导出格式</label>
+                    <div class="space-y-2">
+                        <label class="flex items-center">
+                            <input type="checkbox" id="export-csv" checked class="mr-2">
+                            <span>CSV格式（评论数据）</span>
+                        </label>
+                        <label class="flex items-center">
+                            <input type="checkbox" id="export-markdown" checked class="mr-2">
+                            <span>Markdown格式（分析报告）</span>
+                        </label>
+                        <label class="flex items-center">
+                            <input type="checkbox" id="export-json" class="mr-2">
+                            <span>JSON格式（完整数据）</span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">文件命名规则</label>
+                    <input type="text" id="export-filename-pattern" value="{platform}_{title}_{date}" 
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                    <p class="text-xs text-gray-500 mt-1">支持变量: {platform}, {title}, {date}, {time}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 状态栏 -->
+        <div id="status-bar" class="fixed bottom-4 right-4 bg-white shadow-lg rounded-lg p-4 max-w-sm hidden">
+            <div class="flex items-center space-x-2">
+                <div id="status-icon" class="w-4 h-4 rounded-full"></div>
+                <span id="status-text" class="text-sm"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 隐藏的文件输入 -->
+    <input type="file" id="import-file" accept=".json" style="display: none;">
+
+    <script src="options.js"></script>
+</body>
+</html> 
