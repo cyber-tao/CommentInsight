@@ -190,8 +190,10 @@ class CommentInsightPopup {
     }
 
     generatePageKey() {
-        // 基于URL生成页面唯一键
-        return btoa(this.currentTab.url).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
+        // 基于URL生成页面唯一键（Unicode安全）
+        const url = this.currentTab?.url || '';
+        const safeBase64 = btoa(unescape(encodeURIComponent(url)));
+        return safeBase64.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
     }
 
     async extractComments() {
@@ -214,7 +216,8 @@ class CommentInsightPopup {
                 action: 'extractComments',
                 platform: this.currentPlatform.name,
                 url: this.currentTab.url,
-                config: this.config
+                config: this.config,
+                tabId: this.currentTab.id
             });
 
             if (response.success) {

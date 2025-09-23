@@ -82,7 +82,7 @@ class CommentInsightBackground {
                     break;
 
                 case 'extractComments':
-                    const comments = await this.extractComments(message.platform, message.url, message.config);
+                    const comments = await this.extractComments(message.platform, message.url, message.config, message.tabId);
                     sendResponse({ success: true, comments });
                     break;
 
@@ -166,7 +166,7 @@ class CommentInsightBackground {
         };
     }
 
-    async extractComments(platform, url, config) {
+    async extractComments(platform, url, config, tabId) {
         try {
             console.log(`开始提取${platform}平台的评论`);
 
@@ -174,13 +174,13 @@ class CommentInsightBackground {
                 case 'youtube':
                     return await this.extractYouTubeComments(url, config);
                 case 'tiktok':
-                    return await this.extractTikTokComments(url, config);
+                    return await this.extractTikTokComments(url, config, tabId);
                 case 'instagram':
-                    return await this.extractInstagramComments(url, config);
+                    return await this.extractInstagramComments(url, config, tabId);
                 case 'facebook':
-                    return await this.extractFacebookComments(url, config);
+                    return await this.extractFacebookComments(url, config, tabId);
                 case 'twitter':
-                    return await this.extractTwitterComments(url, config);
+                    return await this.extractTwitterComments(url, config, tabId);
                 default:
                     throw new Error(`不支持的平台: ${platform}`);
             }
@@ -201,25 +201,45 @@ class CommentInsightBackground {
             throw new Error('YouTube API密钥未配置');
         }
 
-        const maxResults = config.platforms.youtube.maxComments || 100;
-        const apiUrl = `https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&videoId=${videoId}&maxResults=${maxResults}&key=${apiKey}`;
+        const targetCount = config.platforms.youtube.maxComments || 100;
 
         try {
-            const response = await fetch(apiUrl);
-            const data = await response.json();
+            let pageToken = '';
+            const all = [];
+            while (all.length < targetCount) {
+                const remaining = targetCount - all.length;
+                const pageSize = Math.min(100, Math.max(1, remaining));
+                const params = new URLSearchParams({
+                    part: 'snippet',
+                    videoId: videoId,
+                    maxResults: String(pageSize),
+                    key: apiKey
+                });
+                if (pageToken) params.set('pageToken', pageToken);
 
-            if (!response.ok) {
-                throw new Error(data.error?.message || 'YouTube API请求失败');
+                const apiUrl = `https://www.googleapis.com/youtube/v3/commentThreads?${params.toString()}`;
+                const response = await fetch(apiUrl);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error?.message || 'YouTube API请求失败');
+                }
+
+                const mapped = (data.items || []).map(item => ({
+                    id: item.id,
+                    author: item.snippet.topLevelComment.snippet.authorDisplayName,
+                    text: item.snippet.topLevelComment.snippet.textOriginal, // 避免HTML
+                    timestamp: item.snippet.topLevelComment.snippet.publishedAt,
+                    likes: item.snippet.topLevelComment.snippet.likeCount || 0,
+                    replies: item.snippet.totalReplyCount || 0
+                }));
+                all.push(...mapped);
+
+                pageToken = data.nextPageToken || '';
+                if (!pageToken) break;
             }
 
-            return data.items.map(item => ({
-                id: item.id,
-                author: item.snippet.topLevelComment.snippet.authorDisplayName,
-                text: item.snippet.topLevelComment.snippet.textDisplay,
-                timestamp: item.snippet.topLevelComment.snippet.publishedAt,
-                likes: item.snippet.topLevelComment.snippet.likeCount || 0,
-                replies: item.snippet.totalReplyCount || 0
-            }));
+            return all.slice(0, targetCount);
         } catch (error) {
             throw new Error(`YouTube评论提取失败: ${error.message}`);
         }
@@ -239,100 +259,96 @@ class CommentInsightBackground {
         return null;
     }
 
-    async extractTikTokComments(url, config) {
+    async extractTikTokComments(url, config, tabId) {
         // TikTok评论提取需要通过content script进行DOM解析
         // 因为TikTok的API访问限制较多
         return new Promise((resolve, reject) => {
-            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                if (tabs[0]) {
-                    chrome.tabs.sendMessage(tabs[0].id, {
+            const sendTo = tabId;
+            if (sendTo) {
+                chrome.tabs.sendMessage(sendTo, {
                         action: 'extractTikTokComments',
                         config: config
-                    }, (response) => {
-                        if (chrome.runtime.lastError) {
-                            reject(new Error(chrome.runtime.lastError.message));
-                        } else if (response && response.success) {
-                            resolve(response.comments);
-                        } else {
-                            reject(new Error(response?.error || 'TikTok评论提取失败'));
-                        }
-                    });
-                } else {
-                    reject(new Error('无法找到活动标签页'));
-                }
-            });
+                }, (response) => {
+                    if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                    } else if (response && response.success) {
+                        resolve(response.comments);
+                    } else {
+                        reject(new Error(response?.error || 'TikTok评论提取失败'));
+                    }
+                });
+            } else {
+                reject(new Error('未提供有效的tabId'));
+            }
         });
     }
 
-    async extractInstagramComments(url, config) {
+    async extractInstagramComments(url, config, tabId) {
         // Instagram评论提取同样需要通过content script
         return new Promise((resolve, reject) => {
-            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                if (tabs[0]) {
-                    chrome.tabs.sendMessage(tabs[0].id, {
+            const sendTo = tabId;
+            if (sendTo) {
+                chrome.tabs.sendMessage(sendTo, {
                         action: 'extractInstagramComments',
                         config: config
-                    }, (response) => {
-                        if (chrome.runtime.lastError) {
-                            reject(new Error(chrome.runtime.lastError.message));
-                        } else if (response && response.success) {
-                            resolve(response.comments);
-                        } else {
-                            reject(new Error(response?.error || 'Instagram评论提取失败'));
-                        }
-                    });
-                } else {
-                    reject(new Error('无法找到活动标签页'));
-                }
-            });
+                }, (response) => {
+                    if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                    } else if (response && response.success) {
+                        resolve(response.comments);
+                    } else {
+                        reject(new Error(response?.error || 'Instagram评论提取失败'));
+                    }
+                });
+            } else {
+                reject(new Error('未提供有效的tabId'));
+            }
         });
     }
 
-    async extractFacebookComments(url, config) {
+    async extractFacebookComments(url, config, tabId) {
         // Facebook评论提取
         return new Promise((resolve, reject) => {
-            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                if (tabs[0]) {
-                    chrome.tabs.sendMessage(tabs[0].id, {
+            const sendTo = tabId;
+            if (sendTo) {
+                chrome.tabs.sendMessage(sendTo, {
                         action: 'extractFacebookComments',
                         config: config
-                    }, (response) => {
-                        if (chrome.runtime.lastError) {
-                            reject(new Error(chrome.runtime.lastError.message));
-                        } else if (response && response.success) {
-                            resolve(response.comments);
-                        } else {
-                            reject(new Error(response?.error || 'Facebook评论提取失败'));
-                        }
-                    });
-                } else {
-                    reject(new Error('无法找到活动标签页'));
-                }
-            });
+                }, (response) => {
+                    if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                    } else if (response && response.success) {
+                        resolve(response.comments);
+                    } else {
+                        reject(new Error(response?.error || 'Facebook评论提取失败'));
+                    }
+                });
+            } else {
+                reject(new Error('未提供有效的tabId'));
+            }
         });
     }
 
-    async extractTwitterComments(url, config) {
+    async extractTwitterComments(url, config, tabId) {
         // Twitter评论提取
         return new Promise((resolve, reject) => {
-            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                if (tabs[0]) {
-                    chrome.tabs.sendMessage(tabs[0].id, {
+            const sendTo = tabId;
+            if (sendTo) {
+                chrome.tabs.sendMessage(sendTo, {
                         action: 'extractTwitterComments',
                         config: config
-                    }, (response) => {
-                        if (chrome.runtime.lastError) {
-                            reject(new Error(chrome.runtime.lastError.message));
-                        } else if (response && response.success) {
-                            resolve(response.comments);
-                        } else {
-                            reject(new Error(response?.error || 'Twitter评论提取失败'));
-                        }
-                    });
-                } else {
-                    reject(new Error('无法找到活动标签页'));
-                }
-            });
+                }, (response) => {
+                    if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                    } else if (response && response.success) {
+                        resolve(response.comments);
+                    } else {
+                        reject(new Error(response?.error || 'Twitter评论提取失败'));
+                    }
+                });
+            } else {
+                reject(new Error('未提供有效的tabId'));
+            }
         });
     }
 
@@ -345,81 +361,110 @@ class CommentInsightBackground {
                 throw new Error('AI API密钥未配置');
             }
 
-            // 准备评论数据
-            const commentsText = comments.map(comment => comment.text).join('\n\n');
-            
-            const prompt = `请分析以下社交媒体评论，生成结构化的分析报告：
-
-评论数据：
-${commentsText}
-
-请按照以下格式生成分析报告：
-
-## 关键洞察
-[总结3-5个主要洞察点]
-
-## 情感分析
-- 正面情感: X%
-- 中性情感: X% 
-- 负面情感: X%
-
-## 主要主题
-1. [主题1]: [描述]
-2. [主题2]: [描述]
-3. [主题3]: [描述]
-
-## 显著趋势
-[描述观察到的趋势和模式]
-
-## 建议
-[基于分析提供的建议]`;
-
-            const requestBody = {
-                model: aiConfig.model,
-                messages: [
-                    {
-                        role: 'system',
-                        content: aiConfig.systemPrompt
-                    },
-                    {
-                        role: 'user',
-                        content: prompt
-                    }
-                ],
-                temperature: aiConfig.temperature,
-                max_tokens: aiConfig.maxTokens
-            };
-
-            const response = await fetch(`${aiConfig.endpoint}/chat/completions`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${aiConfig.apiKey}`
-                },
-                body: JSON.stringify(requestBody)
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error?.message || 'AI分析请求失败');
+            // 若评论较多，采用分批总结再汇总
+            const large = comments.length > 200 || comments.map(c => c.text || '').join('').length > 8000;
+            if (large) {
+                const partials = await this.summarizeInChunks(comments, aiConfig);
+                const final = await this.finalizeSummary(partials, aiConfig);
+                return {
+                    rawAnalysis: final,
+                    timestamp: new Date().toISOString(),
+                    commentCount: comments.length,
+                    model: aiConfig.model,
+                    summary: this.extractSummaryFromAnalysis(final)
+                };
             }
 
-            const analysisText = data.choices[0].message.content;
+            const commentsText = comments.map(comment => `- ${comment.text}`).join('\n');
+            const prompt = `请分析以下社交媒体评论，生成结构化的分析报告：\n\n${commentsText}\n\n请按照以下格式输出：\n\n## 关键洞察\n[总结3-5个主要洞察点]\n\n## 情感分析\n- 正面情感: X%\n- 中性情感: X%\n- 负面情感: X%\n\n## 主要主题\n1. [主题1]: [描述]\n2. [主题2]: [描述]\n3. [主题3]: [描述]\n\n## 显著趋势\n[描述观察到的趋势和模式]\n\n## 建议\n[基于分析提供的建议]`;
 
-            // 解析分析结果
+            const data = await this.chatCompletion(aiConfig, [
+                { role: 'system', content: aiConfig.systemPrompt },
+                { role: 'user', content: prompt }
+            ], aiConfig.maxTokens);
+
+            if (!data.success) {
+                throw new Error(data.error || 'AI分析请求失败');
+            }
+
+            const analysisText = data.text;
             return {
                 rawAnalysis: analysisText,
                 timestamp: new Date().toISOString(),
                 commentCount: comments.length,
                 model: aiConfig.model,
-                // 可以添加更多结构化数据提取
                 summary: this.extractSummaryFromAnalysis(analysisText)
             };
 
         } catch (error) {
             console.error('AI分析失败:', error);
             throw error;
+        }
+    }
+
+    async summarizeInChunks(comments, aiConfig) {
+        const chunks = [];
+        let buffer = [];
+        let charCount = 0;
+        const LIMIT = 8000; // 粗略字符限制
+        for (const c of comments) {
+            const t = String(c.text || '');
+            if (charCount + t.length > LIMIT && buffer.length > 0) {
+                chunks.push(buffer);
+                buffer = [];
+                charCount = 0;
+            }
+            buffer.push(c);
+            charCount += t.length;
+        }
+        if (buffer.length > 0) chunks.push(buffer);
+
+        const results = [];
+        for (const chunk of chunks) {
+            const chunkText = chunk.map(c => `- ${c.text}`).join('\n');
+            const prompt = `以下是部分评论，请提炼要点，输出小结（要点、情感比例、主题与显著现象）：\n\n${chunkText}`;
+            const data = await this.chatCompletion(aiConfig, [
+                { role: 'system', content: aiConfig.systemPrompt },
+                { role: 'user', content: prompt }
+            ], Math.max(512, Math.min(2048, aiConfig.maxTokens || 2000)));
+            if (!data.success) throw new Error(data.error || '分批总结失败');
+            results.push(data.text);
+        }
+        return results;
+    }
+
+    async finalizeSummary(partials, aiConfig) {
+        const prompt = `将以下分批小结合并为一份完整的分析报告，避免重复，提供最终可执行建议：\n\n${partials.map((t, i) => `【小结${i+1}】\n${t}`).join('\n\n')}\n\n请按照以下结构输出：\n\n## 关键洞察\n...\n\n## 情感分析\n- 正面情感: X%\n- 中性情感: X%\n- 负面情感: X%\n\n## 主要主题\n1. ...\n2. ...\n3. ...\n\n## 显著趋势\n...\n\n## 建议\n...`;
+        const data = await this.chatCompletion(aiConfig, [
+            { role: 'system', content: aiConfig.systemPrompt },
+            { role: 'user', content: prompt }
+        ], aiConfig.maxTokens);
+        if (!data.success) throw new Error(data.error || '汇总失败');
+        return data.text;
+    }
+
+    async chatCompletion(aiConfig, messages, maxTokens) {
+        try {
+            const response = await fetch(`${aiConfig.endpoint}/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${aiConfig.apiKey}`
+                },
+                body: JSON.stringify({
+                    model: aiConfig.model,
+                    messages,
+                    temperature: aiConfig.temperature,
+                    max_tokens: maxTokens
+                })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                return { success: false, error: data.error?.message || '请求失败' };
+            }
+            return { success: true, text: data.choices?.[0]?.message?.content || '' };
+        } catch (e) {
+            return { success: false, error: e.message };
         }
     }
 
@@ -580,15 +625,26 @@ ${commentsText}
         const csvContent = [
             headers.join(','),
             ...data.comments.map(comment => [
-                `"${comment.author || ''}"`,
-                `"${(comment.text || '').replace(/"/g, '""')}"`,
-                `"${comment.timestamp || ''}"`,
+                this.safeCsvCell(comment.author || ''),
+                this.safeCsvCell(comment.text || ''),
+                this.safeCsvCell(comment.timestamp || ''),
                 comment.likes || 0,
                 comment.replies || 0
             ].join(','))
         ].join('\n');
 
         return csvContent;
+    }
+
+    safeCsvCell(raw) {
+        let v = String(raw || '').replace(/"/g, '""');
+        // 防CSV注入
+        if (/^[=+\-@]/.test(v)) {
+            v = "'" + v;
+        }
+        // 规范换行
+        v = v.replace(/\r?\n/g, ' ');
+        return `"${v}"`;
     }
 
     convertToMarkdown(data) {
@@ -607,9 +663,9 @@ ${commentsText}
             markdown += `## 评论详情\n\n`;
             data.comments.forEach((comment, index) => {
                 markdown += `### 评论 ${index + 1}\n`;
-                markdown += `**作者**: ${comment.author || '匿名'}\n`;
-                markdown += `**时间**: ${comment.timestamp || '未知'}\n`;
-                markdown += `**内容**: ${comment.text || ''}\n`;
+                markdown += `**作者**: ${this.escapeMarkdownText(comment.author || '匿名')}\n`;
+                markdown += `**时间**: ${this.escapeMarkdownText(comment.timestamp || '未知')}\n`;
+                markdown += `**内容**: ${this.escapeMarkdownText(comment.text || '')}\n`;
                 if (comment.likes > 0) markdown += `**点赞**: ${comment.likes}\n`;
                 if (comment.replies > 0) markdown += `**回复**: ${comment.replies}\n`;
                 markdown += `\n---\n\n`;
@@ -617,6 +673,16 @@ ${commentsText}
         }
 
         return markdown;
+    }
+
+    escapeMarkdownText(text) {
+        return String(text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/`/g, '\\`')
+            .replace(/\*/g, '\\*')
+            .replace(/_/g, '\\_');
     }
 }
 

@@ -13,6 +13,20 @@ class CommentInsightViewer {
         this.initializeViewer();
     }
 
+    // 安全工具函数
+    escapeHtml(s) {
+        return String(s || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    escapeRegExp(s) {
+        return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
     async initializeViewer() {
         try {
             // 获取URL参数
@@ -264,6 +278,9 @@ class CommentInsightViewer {
         const timestamp = new Date(comment.timestamp).toLocaleString('zh-CN');
         const likes = comment.likes || 0;
         const replies = comment.replies || 0;
+        const safeAuthor = this.escapeHtml(comment.author || '');
+        const safeInitial = safeAuthor.charAt(0).toUpperCase();
+        const safeText = this.escapeHtml(comment.text || '');
 
         return `
             <div class="comment-card bg-white rounded-lg shadow-sm p-6 border border-gray-200">
@@ -271,16 +288,16 @@ class CommentInsightViewer {
                     <div class="flex-shrink-0">
                         <div class="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center">
                             <span class="text-sm font-medium text-gray-600">
-                                ${comment.author.charAt(0).toUpperCase()}
+                                ${safeInitial}
                             </span>
                         </div>
                     </div>
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center justify-between">
-                            <p class="text-sm font-medium text-gray-900">${comment.author}</p>
+                            <p class="text-sm font-medium text-gray-900">${safeAuthor}</p>
                             <span class="text-xs text-gray-500">${timestamp}</span>
                         </div>
-                        <p class="mt-2 text-gray-700 whitespace-pre-wrap">${comment.text}</p>
+                        <p class="mt-2 text-gray-700 whitespace-pre-wrap">${safeText}</p>
                         <div class="mt-3 flex items-center space-x-4 text-sm text-gray-500">
                             ${likes > 0 ? `
                                 <span class="flex items-center">
@@ -396,9 +413,10 @@ class CommentInsightViewer {
 
         textNodes.forEach(textNode => {
             const content = textNode.textContent;
-            const regex = new RegExp(`(${this.searchTerm})`, 'gi');
+            const safeContent = this.escapeHtml(content);
+            const regex = new RegExp(`(${this.escapeRegExp(this.searchTerm)})`, 'gi');
             if (regex.test(content)) {
-                const highlightedContent = content.replace(regex, '<span class="highlight">$1</span>');
+                const highlightedContent = safeContent.replace(regex, '<span class="highlight">$1</span>');
                 const wrapper = document.createElement('span');
                 wrapper.innerHTML = highlightedContent;
                 textNode.parentNode.replaceChild(wrapper, textNode);
@@ -418,7 +436,7 @@ class CommentInsightViewer {
 
         const analysis = this.currentData.analysis;
 
-        // 渲染分析内容
+        // 渲染分析内容（先转义后有限Markdown渲染）
         contentElement.innerHTML = this.markdownToHtml(analysis.rawAnalysis || '暂无分析结果');
 
         // 渲染元数据
@@ -433,8 +451,9 @@ class CommentInsightViewer {
     }
 
     markdownToHtml(markdown) {
-        // 简单的Markdown到HTML转换
-        return markdown
+        // 先转义以避免XSS，再进行有限Markdown转换
+        const safe = this.escapeHtml(markdown || '');
+        return safe
             .replace(/^### (.*$)/gim, '<h3>$1</h3>')
             .replace(/^## (.*$)/gim, '<h2>$1</h2>')
             .replace(/^# (.*$)/gim, '<h1>$1</h1>')
@@ -498,6 +517,7 @@ class CommentInsightViewer {
             facebook: '👥',
             twitter: '🐦'
         };
+        const safeTitle = this.escapeHtml(item.title || '');
 
         return `
             <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200 hover:shadow-md transition-shadow">
@@ -508,7 +528,7 @@ class CommentInsightViewer {
                             <span class="text-sm font-medium text-gray-600 uppercase">${item.platform}</span>
                             ${item.hasAnalysis ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">已分析</span>' : ''}
                         </div>
-                        <h3 class="text-lg font-medium text-gray-900 mb-2">${item.title}</h3>
+                        <h3 class="text-lg font-medium text-gray-900 mb-2">${safeTitle}</h3>
                         <div class="flex items-center space-x-4 text-sm text-gray-500">
                             <span>📝 ${item.commentCount} 条评论</span>
                             <span>🕒 ${timestamp}</span>
