@@ -24,7 +24,7 @@ class CommentInsightBackground {
 
     async onInstalled(details) {
         console.log('评论洞察扩展已安装/更新', details);
-        
+
         // 设置默认配置
         const defaultConfig = {
             ai: {
@@ -55,6 +55,11 @@ class CommentInsightBackground {
                 twitter: {
                     bearerToken: '',
                     apiVersion: 'v2'
+                },
+                bilibili: {
+                    mode: 'dom',
+                    delay: 1000,
+                    maxScrolls: 20
                 }
             },
             export: {
@@ -146,7 +151,9 @@ class CommentInsightBackground {
             'facebook.com': 'facebook',
             'fb.com': 'facebook',
             'twitter.com': 'twitter',
-            'x.com': 'twitter'
+            'x.com': 'twitter',
+            'bilibili.com': 'bilibili',
+            'b23.tv': 'bilibili'
         };
 
         for (const [domain, platform] of Object.entries(platforms)) {
@@ -181,6 +188,8 @@ class CommentInsightBackground {
                     return await this.extractFacebookComments(url, config, tabId);
                 case 'twitter':
                     return await this.extractTwitterComments(url, config, tabId);
+                case 'bilibili':
+                    return await this.extractBilibiliComments(url, config, tabId);
                 default:
                     throw new Error(`不支持的平台: ${platform}`);
             }
@@ -228,7 +237,7 @@ class CommentInsightBackground {
                 const mapped = (data.items || []).map(item => ({
                     id: item.id,
                     author: item.snippet.topLevelComment.snippet.authorDisplayName,
-                    text: item.snippet.topLevelComment.snippet.textOriginal, // 避免HTML
+                    text: item.snippet.topLevelComment.snippet.textOriginal,
                     timestamp: item.snippet.topLevelComment.snippet.publishedAt,
                     likes: item.snippet.topLevelComment.snippet.likeCount || 0,
                     replies: item.snippet.totalReplyCount || 0
@@ -260,14 +269,12 @@ class CommentInsightBackground {
     }
 
     async extractTikTokComments(url, config, tabId) {
-        // TikTok评论提取需要通过content script进行DOM解析
-        // 因为TikTok的API访问限制较多
         return new Promise((resolve, reject) => {
             const sendTo = tabId;
             if (sendTo) {
                 chrome.tabs.sendMessage(sendTo, {
-                        action: 'extractTikTokComments',
-                        config: config
+                    action: 'extractTikTokComments',
+                    config: config
                 }, (response) => {
                     if (chrome.runtime.lastError) {
                         reject(new Error(chrome.runtime.lastError.message));
@@ -284,13 +291,12 @@ class CommentInsightBackground {
     }
 
     async extractInstagramComments(url, config, tabId) {
-        // Instagram评论提取同样需要通过content script
         return new Promise((resolve, reject) => {
             const sendTo = tabId;
             if (sendTo) {
                 chrome.tabs.sendMessage(sendTo, {
-                        action: 'extractInstagramComments',
-                        config: config
+                    action: 'extractInstagramComments',
+                    config: config
                 }, (response) => {
                     if (chrome.runtime.lastError) {
                         reject(new Error(chrome.runtime.lastError.message));
@@ -307,13 +313,12 @@ class CommentInsightBackground {
     }
 
     async extractFacebookComments(url, config, tabId) {
-        // Facebook评论提取
         return new Promise((resolve, reject) => {
             const sendTo = tabId;
             if (sendTo) {
                 chrome.tabs.sendMessage(sendTo, {
-                        action: 'extractFacebookComments',
-                        config: config
+                    action: 'extractFacebookComments',
+                    config: config
                 }, (response) => {
                     if (chrome.runtime.lastError) {
                         reject(new Error(chrome.runtime.lastError.message));
@@ -330,13 +335,12 @@ class CommentInsightBackground {
     }
 
     async extractTwitterComments(url, config, tabId) {
-        // Twitter评论提取
         return new Promise((resolve, reject) => {
             const sendTo = tabId;
             if (sendTo) {
                 chrome.tabs.sendMessage(sendTo, {
-                        action: 'extractTwitterComments',
-                        config: config
+                    action: 'extractTwitterComments',
+                    config: config
                 }, (response) => {
                     if (chrome.runtime.lastError) {
                         reject(new Error(chrome.runtime.lastError.message));
@@ -352,6 +356,36 @@ class CommentInsightBackground {
         });
     }
 
+    async extractBilibiliComments(url, config, tabId) {
+        return new Promise((resolve, reject) => {
+            if (!tabId) {
+                reject(new Error('未提供有效的tabId'));
+                return;
+            }
+
+            // 设置超时
+            const timeout = setTimeout(() => {
+                reject(new Error('Bilibili评论提取超时，请刷新页面后重试'));
+            }, 30000); // 30秒超时
+
+            chrome.tabs.sendMessage(tabId, {
+                action: 'extractBilibiliComments',
+                config: config
+            }, (response) => {
+                clearTimeout(timeout);
+                
+                if (chrome.runtime.lastError) {
+                    console.error('Chrome消息传递错误:', chrome.runtime.lastError);
+                    reject(new Error('无法连接到页面脚本，请刷新页面后重试'));
+                } else if (response && response.success) {
+                    resolve(response.comments);
+                } else {
+                    reject(new Error(response?.error || 'Bilibili评论提取失败'));
+                }
+            });
+        });
+    }
+
     async analyzeComments(comments, config) {
         try {
             console.log('开始AI分析评论');
@@ -361,7 +395,6 @@ class CommentInsightBackground {
                 throw new Error('AI API密钥未配置');
             }
 
-            // 若评论较多，采用分批总结再汇总
             const large = comments.length > 200 || comments.map(c => c.text || '').join('').length > 8000;
             if (large) {
                 const partials = await this.summarizeInChunks(comments, aiConfig);
@@ -376,7 +409,14 @@ class CommentInsightBackground {
             }
 
             const commentsText = comments.map(comment => `- ${comment.text}`).join('\n');
-            const prompt = `请分析以下社交媒体评论，生成结构化的分析报告：\n\n${commentsText}\n\n请按照以下格式输出：\n\n## 关键洞察\n[总结3-5个主要洞察点]\n\n## 情感分析\n- 正面情感: X%\n- 中性情感: X%\n- 负面情感: X%\n\n## 主要主题\n1. [主题1]: [描述]\n2. [主题2]: [描述]\n3. [主题3]: [描述]\n\n## 显著趋势\n[描述观察到的趋势和模式]\n\n## 建议\n[基于分析提供的建议]`;
+            const prompt = '请分析以下社交媒体评论，生成结构化的分析报告：\n\n' +
+                commentsText +
+                '\n\n请按照以下格式输出：\n\n' +
+                '## 关键洞察\n[总结3-5个主要洞察点]\n\n' +
+                '## 情感分析\n- 正面情感: X%\n- 中性情感: X%\n- 负面情感: X%\n\n' +
+                '## 主要主题\n1. [主题1]: [描述]\n2. [主题2]: [描述]\n3. [主题3]: [描述]\n\n' +
+                '## 显著趋势\n[描述观察到的趋势和模式]\n\n' +
+                '## 建议\n[基于分析提供的建议]';
 
             const data = await this.chatCompletion(aiConfig, [
                 { role: 'system', content: aiConfig.systemPrompt },
@@ -406,7 +446,7 @@ class CommentInsightBackground {
         const chunks = [];
         let buffer = [];
         let charCount = 0;
-        const LIMIT = 8000; // 粗略字符限制
+        const LIMIT = 8000;
         for (const c of comments) {
             const t = String(c.text || '');
             if (charCount + t.length > LIMIT && buffer.length > 0) {
@@ -422,7 +462,7 @@ class CommentInsightBackground {
         const results = [];
         for (const chunk of chunks) {
             const chunkText = chunk.map(c => `- ${c.text}`).join('\n');
-            const prompt = `以下是部分评论，请提炼要点，输出小结（要点、情感比例、主题与显著现象）：\n\n${chunkText}`;
+            const prompt = '以下是部分评论，请提炼要点，输出小结（要点、情感比例、主题与显著现象）：\n\n' + chunkText;
             const data = await this.chatCompletion(aiConfig, [
                 { role: 'system', content: aiConfig.systemPrompt },
                 { role: 'user', content: prompt }
@@ -434,7 +474,33 @@ class CommentInsightBackground {
     }
 
     async finalizeSummary(partials, aiConfig) {
-        const prompt = `将以下分批小结合并为一份完整的分析报告，避免重复，提供最终可执行建议：\n\n${partials.map((t, i) => `【小结${i+1}】\n${t}`).join('\n\n')}\n\n请按照以下结构输出：\n\n## 关键洞察\n...\n\n## 情感分析\n- 正面情感: X%\n- 中性情感: X%\n- 负面情感: X%\n\n## 主要主题\n1. ...\n2. ...\n3. ...\n\n## 显著趋势\n...\n\n## 建议\n...`;
+        const prompt = [
+            '将以下分批小结合并为一份完整的分析报告，避免重复，提供最终可执行建议：',
+            '',
+            partials.map((t, i) => `【小结${i + 1}】\n${t}`).join('\n\n'),
+            '',
+            '请按照以下结构输出：',
+            '',
+            '## 关键洞察',
+            '...',
+            '',
+            '## 情感分析',
+            '- 正面情感: X%',
+            '- 中性情感: X%',
+            '- 负面情感: X%',
+            '',
+            '## 主要主题',
+            '1. ...',
+            '2. ...',
+            '3. ...',
+            '',
+            '## 显著趋势',
+            '...',
+            '',
+            '## 建议',
+            '...'
+        ].join('\n');
+
         const data = await this.chatCompletion(aiConfig, [
             { role: 'system', content: aiConfig.systemPrompt },
             { role: 'user', content: prompt }
@@ -469,8 +535,6 @@ class CommentInsightBackground {
     }
 
     extractSummaryFromAnalysis(analysisText) {
-        // 简单的文本解析来提取关键信息
-        // 在实际应用中可以使用更复杂的解析逻辑
         return {
             insights: [],
             sentiment: {
@@ -486,7 +550,7 @@ class CommentInsightBackground {
     async testAIConnection(config) {
         try {
             const testPrompt = '请回复"连接成功"来确认API连接正常。';
-            
+
             const requestBody = {
                 model: config.model || 'gpt-3.5-turbo',
                 messages: [
@@ -583,37 +647,72 @@ class CommentInsightBackground {
             switch (format) {
                 case 'csv':
                     content = this.convertToCSV(data);
-                    mimeType = 'text/csv';
+                    mimeType = 'text/csv;charset=utf-8';
                     break;
                 case 'markdown':
                     content = this.convertToMarkdown(data);
-                    mimeType = 'text/markdown';
+                    mimeType = 'text/markdown;charset=utf-8';
                     break;
                 case 'json':
                     content = JSON.stringify(data, null, 2);
-                    mimeType = 'application/json';
+                    mimeType = 'application/json;charset=utf-8';
                     break;
                 default:
                     throw new Error('不支持的导出格式');
             }
 
-            // 使用Chrome下载API
-            const blob = new Blob([content], { type: mimeType });
-            const url = URL.createObjectURL(blob);
-
-            await chrome.downloads.download({
-                url: url,
-                filename: filename,
-                saveAs: true
-            });
-
-            // 清理临时URL
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            if (this.isServiceWorkerEnvironment()) {
+                await this.downloadWithDataURL(content, mimeType, filename);
+            } else {
+                await this.downloadWithObjectURL(content, mimeType, filename);
+            }
 
         } catch (error) {
             console.error('导出数据失败:', error);
             throw error;
         }
+    }
+
+    isServiceWorkerEnvironment() {
+        return typeof window === 'undefined' &&
+            typeof importScripts === 'function' &&
+            typeof chrome !== 'undefined' &&
+            chrome.downloads;
+    }
+
+    async downloadWithDataURL(content, mimeType, filename) {
+        const base64Content = btoa(unescape(encodeURIComponent(content)));
+        const dataURL = `data:${mimeType};base64,${base64Content}`;
+
+        await chrome.downloads.download({
+            url: dataURL,
+            filename: filename,
+            saveAs: true
+        });
+    }
+
+    async downloadWithObjectURL(content, mimeType, filename) {
+        if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+            await this.downloadWithDataURL(content, mimeType, filename);
+            return;
+        }
+
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+
+        await chrome.downloads.download({
+            url: url,
+            filename: filename,
+            saveAs: true
+        });
+
+        setTimeout(() => {
+            try {
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                console.warn('清理Object URL失败:', e);
+            }
+        }, 1000);
     }
 
     convertToCSV(data) {
@@ -633,16 +732,15 @@ class CommentInsightBackground {
             ].join(','))
         ].join('\n');
 
-        return csvContent;
+        // 添加UTF-8 BOM标识符以解决中文乱码问题
+        return '\uFEFF' + csvContent;
     }
 
     safeCsvCell(raw) {
         let v = String(raw || '').replace(/"/g, '""');
-        // 防CSV注入
         if (/^[=+\-@]/.test(v)) {
             v = "'" + v;
         }
-        // 规范换行
         v = v.replace(/\r?\n/g, ' ');
         return `"${v}"`;
     }
@@ -650,7 +748,11 @@ class CommentInsightBackground {
     convertToMarkdown(data) {
         let markdown = `# 评论分析报告\n\n`;
         markdown += `**生成时间**: ${new Date().toLocaleString('zh-CN')}\n`;
-        markdown += `**评论数量**: ${data.comments?.length || 0}\n`;
+        
+        // 修复评论数量获取逻辑
+        const commentCount = data.comments?.length || data.commentCount || 0;
+        markdown += `**评论数量**: ${commentCount}\n`;
+        
         markdown += `**平台**: ${data.platform || '未知'}\n\n`;
 
         if (data.analysis) {
@@ -687,4 +789,4 @@ class CommentInsightBackground {
 }
 
 // 初始化后台服务
-new CommentInsightBackground(); 
+new CommentInsightBackground();

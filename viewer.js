@@ -182,21 +182,55 @@ class CommentInsightViewer {
 
         this.currentView = viewType;
 
-        // 渲染内容
-        switch (viewType) {
-            case 'comments':
-                this.renderComments();
-                break;
-            case 'analysis':
-                this.renderAnalysis();
-                break;
-            case 'history':
-                this.renderHistory();
-                break;
+        // 特殊处理历史视图：动态加载历史数据
+        if (viewType === 'history') {
+            this.loadHistoryData();
+        } else {
+            // 渲染其他内容
+            switch (viewType) {
+                case 'comments':
+                    this.renderComments();
+                    break;
+                case 'analysis':
+                    this.renderAnalysis();
+                    break;
+            }
         }
 
         // 更新数据统计
         this.updateDataInfo();
+    }
+
+    // 单独加载历史数据的方法
+    async loadHistoryData() {
+        try {
+            this.showLoading(true);
+            
+            const response = await this.sendMessage({
+                action: 'loadData',
+                key: 'analysis_history'
+            });
+
+            if (response.success) {
+                // 保持原有数据，只更新历史部分
+                if (!this.currentData) {
+                    this.currentData = {};
+                }
+                this.currentData.history = response.data || [];
+            } else {
+                if (!this.currentData) {
+                    this.currentData = {};
+                }
+                this.currentData.history = [];
+            }
+            
+            this.renderHistory();
+        } catch (error) {
+            console.error('加载历史数据失败:', error);
+            this.showNotification('加载历史数据失败: ' + error.message, 'error');
+        } finally {
+            this.showLoading(false);
+        }
     }
 
     filterAndSortComments() {
@@ -515,7 +549,8 @@ class CommentInsightViewer {
             tiktok: '🎵',
             instagram: '📷',
             facebook: '👥',
-            twitter: '🐦'
+            twitter: '🐦',
+            bilibili: '🌸'
         };
         const safeTitle = this.escapeHtml(item.title || '');
 
@@ -551,10 +586,32 @@ class CommentInsightViewer {
         // 根据历史记录ID打开相应的查看页面
         const item = this.currentData.history.find(h => h.id === itemId);
         if (item) {
-            // 使用历史记录中存储的dataKey，如果没有则生成一个
+            // 优先使用历史记录中存储的dataKey，如果没有则使用ID
             const key = item.dataKey || itemId;
-            const url = chrome.runtime.getURL(`viewer.html?type=comments&key=${key}`);
-            window.open(url, '_blank');
+            
+            // 检查数据是否存在
+            const dataResponse = await this.sendMessage({
+                action: 'loadData',
+                key: `comments_${key}`
+            });
+            
+            if (dataResponse.success && dataResponse.data) {
+                // 数据存在，打开查看页面
+                const url = chrome.runtime.getURL(`viewer.html?type=comments&key=${key}`);
+                window.open(url, '_blank');
+            } else {
+                // 数据不存在，显示错误信息
+                this.showNotification('数据已不存在，可能已被清理', 'warning');
+                
+                // 提供选项删除这条历史记录
+                this.showConfirmDialog(
+                    '数据不存在',
+                    '该历史记录对应的数据已不存在，是否删除这条历史记录？',
+                    () => this.deleteHistoryItem(itemId)
+                );
+            }
+        } else {
+            this.showNotification('找不到指定的历史记录', 'error');
         }
     }
 
@@ -627,17 +684,15 @@ class CommentInsightViewer {
                 return;
             }
 
-            const timestamp = new Date().toISOString().split('T')[0];
-            
             switch (this.currentView) {
                 case 'comments':
-                    await this.exportComments(timestamp);
+                    await this.exportComments();
                     break;
                 case 'analysis':
-                    await this.exportAnalysis(timestamp);
+                    await this.exportAnalysis();
                     break;
                 case 'history':
-                    await this.exportHistory(timestamp);
+                    await this.exportHistory();
                     break;
             }
 
@@ -647,19 +702,59 @@ class CommentInsightViewer {
         }
     }
 
-    async exportComments(timestamp) {
+    // 生成符合新规范的文件名：{platform}-{title}-{date_time}
+    generateFilename(platform, title, extension) {
+        const now = new Date();
+        const dateTime = now.toLocaleDateString('zh-CN').replace(/[^\d]/g, '-') + '_' + 
+                        now.toLocaleTimeString('zh-CN', { hour12: false }).replace(/:/g, '-');
+        
+        // 清理标题，移除特殊字符并限制长度
+        const cleanTitle = this.sanitizeTitle(title || '未知标题');
+        
+        // 中文平台名映射
+        const platformMap = {
+            'youtube': 'youtube',
+            'tiktok': 'tiktok', 
+            'instagram': 'instagram',
+            'facebook': 'facebook',
+            'twitter': 'twitter',
+            'bilibili': 'bilibili'
+        };
+        
+        const platformName = platformMap[platform] || platform;
+        
+        return `${platformName}-${cleanTitle}-${dateTime}.${extension}`;
+    }
+
+    // 清理标题中的特殊字符
+    sanitizeTitle(title) {
+        return title
+            .replace(/[<>:"/\\|?*]/g, '_')  // 替换不允许的文件名字符
+            .replace(/\s+/g, ' ')           // 合并多个空格
+            .trim()                        // 去除首尾空格
+            .substring(0, 50);             // 限制长度为50字符
+    }
+
+    async exportComments() {
         const data = {
             comments: this.filteredComments,
             platform: this.currentData.platform,
             title: this.currentData.title,
-            timestamp: this.currentData.timestamp
+            timestamp: this.currentData.timestamp,
+            commentCount: this.filteredComments.length  // 显式添加评论数量
         };
+
+        const filename = this.generateFilename(
+            this.currentData.platform,
+            this.currentData.title,
+            'csv'
+        );
 
         const response = await this.sendMessage({
             action: 'exportData',
             data: data,
             format: 'csv',
-            filename: `comments_${timestamp}.csv`
+            filename: filename
         });
 
         if (response.success) {
@@ -669,7 +764,7 @@ class CommentInsightViewer {
         }
     }
 
-    async exportAnalysis(timestamp) {
+    async exportAnalysis() {
         if (!this.currentData.analysis) {
             this.showNotification('没有分析数据可导出', 'warning');
             return;
@@ -677,16 +772,24 @@ class CommentInsightViewer {
 
         const data = {
             analysis: this.currentData.analysis,
+            comments: this.filteredComments,  // 添加评论数据
             platform: this.currentData.platform,
             title: this.currentData.title,
-            timestamp: this.currentData.timestamp
+            timestamp: this.currentData.timestamp,
+            commentCount: this.filteredComments.length  // 显式添加评论数量
         };
+
+        const filename = this.generateFilename(
+            this.currentData.platform,
+            this.currentData.title,
+            'md'
+        );
 
         const response = await this.sendMessage({
             action: 'exportData',
             data: data,
             format: 'markdown',
-            filename: `analysis_${timestamp}.md`
+            filename: filename
         });
 
         if (response.success) {
@@ -696,17 +799,23 @@ class CommentInsightViewer {
         }
     }
 
-    async exportHistory(timestamp) {
+    async exportHistory() {
         const data = {
             history: this.currentData.history,
             exportTimestamp: new Date().toISOString()
         };
 
+        const filename = this.generateFilename(
+            'history',
+            '历史记录',
+            'json'
+        );
+
         const response = await this.sendMessage({
             action: 'exportData',
             data: data,
             format: 'json',
-            filename: `history_${timestamp}.json`
+            filename: filename
         });
 
         if (response.success) {

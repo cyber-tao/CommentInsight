@@ -16,7 +16,9 @@
     "https://*.instagram.com/*",
     "https://*.facebook.com/*",
     "https://*.twitter.com/*",
-    "https://*.x.com/*"
+    "https://*.x.com/*",
+    "https://*.bilibili.com/*",
+    "https://b23.tv/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -29,7 +31,9 @@
         "https://*.instagram.com/*",
         "https://*.facebook.com/*",
         "https://*.twitter.com/*",
-        "https://*.x.com/*"
+        "https://*.x.com/*",
+        "https://*.bilibili.com/*",
+        "https://b23.tv/*"
       ],
       "js": ["content.js"],
       "run_at": "document_end"
@@ -46,4 +50,4 @@
     "128": "icons/icon128.png"
   },
   "web_accessible_resources": []
-} 
+}

@@ -70,13 +70,21 @@ class CommentInsightOptions {
         const configInputs = document.querySelectorAll('input, select, textarea');
         
         configInputs.forEach(input => {
-            input.addEventListener('change', () => {
-                // 延迟保存，避免频繁保存
-                clearTimeout(this.autoSaveTimeout);
-                this.autoSaveTimeout = setTimeout(() => {
-                    this.saveConfig(false); // 静默保存
-                }, 1000);
-            });
+            // 为模型选择器添加特殊处理
+            if (input.id === 'ai-model') {
+                input.addEventListener('change', () => {
+                    // 立即保存配置，确保模型选择持久化
+                    this.saveConfig(false);
+                });
+            } else {
+                input.addEventListener('change', () => {
+                    // 延迟保存，避免频繁保存
+                    clearTimeout(this.autoSaveTimeout);
+                    this.autoSaveTimeout = setTimeout(() => {
+                        this.saveConfig(false); // 静默保存
+                    }, 1000);
+                });
+            }
         });
     }
 
@@ -95,6 +103,9 @@ class CommentInsightOptions {
             console.error('加载配置失败:', error);
             this.config = this.getDefaultConfig();
         }
+        
+        // 加载完配置后填充表单
+        await this.populateForm();
     }
 
     getDefaultConfig() {
@@ -138,7 +149,7 @@ class CommentInsightOptions {
         };
     }
 
-    populateForm() {
+    async populateForm() {
         try {
             // AI配置
             document.getElementById('ai-endpoint').value = this.config.ai.endpoint || '';
@@ -148,6 +159,14 @@ class CommentInsightOptions {
             document.getElementById('temperature-value').textContent = this.config.ai.temperature || 0.7;
             document.getElementById('ai-max-tokens').value = this.config.ai.maxTokens || 2000;
             document.getElementById('ai-system-prompt').value = this.config.ai.systemPrompt || '';
+
+            // 尝试加载缓存的模型列表
+            const hasLoadedModels = await this.loadCachedModels();
+            if (!hasLoadedModels) {
+                // 如果没有缓存，设置默认提示
+                const modelSelect = document.getElementById('ai-model');
+                modelSelect.innerHTML = '<option value="">请先配置API密钥并刷新模型列表</option>';
+            }
 
             // 平台配置
             // YouTube
@@ -357,22 +376,20 @@ class CommentInsightOptions {
             });
 
             if (response.success) {
-                // 清空现有选项
-                modelSelect.innerHTML = '';
+                // 保存模型列表到缓存
+                const modelsCache = {
+                    endpoint: aiConfig.endpoint,
+                    models: response.models,
+                    timestamp: Date.now()
+                };
                 
-                // 添加新模型选项
-                response.models.forEach(model => {
-                    const option = document.createElement('option');
-                    option.value = model.id;
-                    option.textContent = model.name;
-                    modelSelect.appendChild(option);
+                await this.sendMessage({
+                    action: 'saveData',
+                    data: { ai_models_cache: modelsCache }
                 });
 
-                // 恢复之前选择的模型
-                if (this.config.ai.model) {
-                    modelSelect.value = this.config.ai.model;
-                }
-
+                // 更新界面
+                this.populateModelSelect(response.models);
                 this.showStatus('模型列表刷新成功', 'success');
             } else {
                 throw new Error(response.error);
@@ -389,6 +406,61 @@ class CommentInsightOptions {
         }
     }
 
+    // 填充模型选择器
+    populateModelSelect(models) {
+        const modelSelect = document.getElementById('ai-model');
+        const currentSelection = modelSelect.value; // 保存当前选择
+        
+        // 清空现有选项
+        modelSelect.innerHTML = '';
+        
+        // 添加新模型选项
+        models.forEach(model => {
+            const option = document.createElement('option');
+            option.value = model.id;
+            option.textContent = model.name;
+            modelSelect.appendChild(option);
+        });
+
+        // 恢复之前的选择
+        if (currentSelection && modelSelect.querySelector(`option[value="${currentSelection}"]`)) {
+            modelSelect.value = currentSelection;
+        } else if (this.config.ai.model && modelSelect.querySelector(`option[value="${this.config.ai.model}"]`)) {
+            modelSelect.value = this.config.ai.model;
+        }
+    }
+
+    // 加载缓存的模型列表
+    async loadCachedModels() {
+        try {
+            const response = await this.sendMessage({
+                action: 'loadData',
+                key: 'ai_models_cache'
+            });
+            
+            if (response.success && response.data) {
+                const cache = response.data;
+                const currentEndpoint = document.getElementById('ai-endpoint').value.trim();
+                
+                // 检查缓存是否有效（同一端点且在24小时内）
+                const isValidCache = cache.endpoint === currentEndpoint &&
+                                  cache.models &&
+                                  cache.timestamp &&
+                                  (Date.now() - cache.timestamp) < 24 * 60 * 60 * 1000;
+                
+                if (isValidCache) {
+                    this.populateModelSelect(cache.models);
+                    return true;
+                }
+            }
+            
+            return false;
+        } catch (error) {
+            console.error('加载缓存模型失败:', error);
+            return false;
+        }
+    }
+
     exportConfig() {
         try {
             const configToExport = this.collectFormData();
@@ -401,15 +473,16 @@ class CommentInsightOptions {
             // ... 等等
 
             const dataStr = JSON.stringify(exportData, null, 2);
-            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const filename = `comment-insight-config-${new Date().toISOString().split('T')[0]}.json`;
             
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(dataBlob);
-            link.download = `comment-insight-config-${new Date().toISOString().split('T')[0]}.json`;
-            
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            // 环境检测和回退机制
+            if (this.canUseObjectURL()) {
+                // 使用Object URL方式
+                this.downloadWithObjectURL(dataStr, 'application/json', filename);
+            } else {
+                // 回退到Data URL方式
+                this.downloadWithDataURL(dataStr, 'application/json', filename);
+            }
             
             this.showStatus('配置导出成功', 'success');
             
@@ -417,6 +490,48 @@ class CommentInsightOptions {
             console.error('导出配置失败:', error);
             this.showStatus('导出配置失败: ' + error.message, 'error');
         }
+    }
+
+    // 检测是否可以使用Object URL
+    canUseObjectURL() {
+        return typeof URL !== 'undefined' && 
+               typeof URL.createObjectURL === 'function' && 
+               typeof Blob === 'function';
+    }
+
+    // 使用Object URL下载
+    downloadWithObjectURL(content, mimeType, filename) {
+        const dataBlob = new Blob([content], { type: mimeType });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(dataBlob);
+        link.download = filename;
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // 清理Object URL
+        setTimeout(() => {
+            try {
+                URL.revokeObjectURL(link.href);
+            } catch (e) {
+                console.warn('清理Object URL失败:', e);
+            }
+        }, 1000);
+    }
+
+    // 使用Data URL下载
+    downloadWithDataURL(content, mimeType, filename) {
+        const base64Content = btoa(unescape(encodeURIComponent(content)));
+        const dataURL = `data:${mimeType};base64,${base64Content}`;
+        
+        const link = document.createElement('a');
+        link.href = dataURL;
+        link.download = filename;
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
 
     importConfig(event) {

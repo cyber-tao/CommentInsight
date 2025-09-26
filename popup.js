@@ -60,11 +60,6 @@ class CommentInsightPopup {
             this.viewAnalysis();
         });
 
-        // 导出按钮
-        document.getElementById('export-btn').addEventListener('click', () => {
-            this.exportData();
-        });
-
         // 历史记录按钮
         document.getElementById('history-btn').addEventListener('click', () => {
             this.viewHistory();
@@ -100,7 +95,8 @@ class CommentInsightPopup {
                 tiktok: { mode: 'dom', delay: 1000 },
                 instagram: { token: '', appId: '' },
                 facebook: { appId: '', appSecret: '' },
-                twitter: { bearerToken: '', apiVersion: 'v2' }
+                twitter: { bearerToken: '', apiVersion: 'v2' },
+                bilibili: { mode: 'dom', delay: 1000, maxScrolls: 20 }
             },
             export: {
                 csv: true,
@@ -136,6 +132,7 @@ class CommentInsightPopup {
             instagram: '📷',
             facebook: '👥',
             twitter: '🐦',
+            bilibili: '🌸',
             unknown: '❓'
         };
 
@@ -145,6 +142,7 @@ class CommentInsightPopup {
             instagram: 'Instagram',
             facebook: 'Facebook',
             twitter: 'Twitter/X',
+            bilibili: 'Bilibili',
             unknown: '未知平台'
         };
 
@@ -192,8 +190,16 @@ class CommentInsightPopup {
     generatePageKey() {
         // 基于URL生成页面唯一键（Unicode安全）
         const url = this.currentTab?.url || '';
-        const safeBase64 = btoa(unescape(encodeURIComponent(url)));
-        return safeBase64.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
+        
+        // 使用简单哈希函数确保同一URL生成相同key
+        let hash = 0;
+        for (let i = 0; i < url.length; i++) {
+            const char = url.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32bit integer
+        }
+        
+        return Math.abs(hash).toString(36).substring(0, 16);
     }
 
     async extractComments() {
@@ -289,6 +295,8 @@ class CommentInsightPopup {
                 return this.config.platforms.twitter.bearerToken;
             case 'tiktok':
                 return true; // TikTok使用DOM解析，不需要API密钥
+            case 'bilibili':
+                return true; // Bilibili使用DOM解析，不需要API密钥
             default:
                 return false;
         }
@@ -321,34 +329,66 @@ class CommentInsightPopup {
 
     async saveToHistory(data, dataKey) {
         try {
+            console.log('开始保存历史记录:', {
+                dataKey,
+                url: data.url,
+                platform: data.platform,
+                title: data.title
+            });
+            
             const response = await this.sendMessage({
                 action: 'loadData',
                 key: 'analysis_history'
             });
 
             let history = response.success ? (response.data || []) : [];
+            console.log('当前历史记录数量:', history.length);
             
-            // 添加新记录
-            history.unshift({
-                id: Date.now().toString(),
-                dataKey: dataKey, // 使用传入的dataKey
+            // 实现去重逻辑：只对相同的dataKey进行更新，不同的URL应该保留为独立记录
+            const existingIndex = history.findIndex(item => 
+                item.dataKey === dataKey
+            );
+
+            const historyItem = {
+                id: existingIndex !== -1 ? history[existingIndex].id : Date.now().toString(),
+                dataKey: dataKey,
                 platform: data.platform,
                 title: data.title,
                 url: data.url,
                 commentCount: data.comments?.length || 0,
                 hasAnalysis: !!data.analysis,
-                timestamp: data.timestamp
-            });
+                analyzing: false,
+                timestamp: existingIndex !== -1 ? history[existingIndex].timestamp : new Date().toISOString()
+            };
+            
+            console.log('准备保存的历史记录:', historyItem);
+
+            if (existingIndex !== -1) {
+                // 更新现有记录
+                history[existingIndex] = historyItem;
+                console.log('更新现有历史记录，索引:', existingIndex);
+            } else {
+                // 添加新记录到列表头部
+                history.unshift(historyItem);
+                console.log('添加新历史记录，新总数:', history.length);
+            }
 
             // 保持最多100条历史记录
             if (history.length > 100) {
                 history = history.slice(0, 100);
+                console.log('超出限制，裁剪到100条');
             }
 
-            await this.sendMessage({
+            const saveResult = await this.sendMessage({
                 action: 'saveData',
                 data: { analysis_history: history }
             });
+            
+            if (saveResult.success) {
+                console.log('历史记录保存成功，当前总数:', history.length);
+            } else {
+                console.error('历史记录保存失败:', saveResult.error);
+            }
 
         } catch (error) {
             console.error('保存历史记录失败:', error);
@@ -372,12 +412,10 @@ class CommentInsightPopup {
         const analyzeBtn = document.getElementById('analyze-btn');
         const viewCommentsBtn = document.getElementById('view-comments-btn');
         const viewAnalysisBtn = document.getElementById('view-analysis-btn');
-        const exportBtn = document.getElementById('export-btn');
 
         analyzeBtn.disabled = this.currentComments.length === 0;
         viewCommentsBtn.disabled = this.currentComments.length === 0;
         viewAnalysisBtn.disabled = !this.currentAnalysis;
-        exportBtn.disabled = this.currentComments.length === 0 && !this.currentAnalysis;
     }
 
     setLoadingState(action, loading) {
@@ -421,78 +459,6 @@ class CommentInsightPopup {
     openViewerPage(type) {
         const url = chrome.runtime.getURL(`viewer.html?type=${type}&key=${this.generatePageKey()}`);
         chrome.tabs.create({ url });
-    }
-
-    async exportData() {
-        try {
-            if (!this.currentComments || this.currentComments.length === 0) {
-                this.showNotification('没有可导出的数据', 'warning');
-                return;
-            }
-
-            const data = {
-                comments: this.currentComments,
-                analysis: this.currentAnalysis,
-                platform: this.currentPlatform.name,
-                url: this.currentTab.url,
-                title: this.currentTab.title,
-                timestamp: new Date().toISOString()
-            };
-
-            const exportConfig = this.config.export;
-            const baseFilename = this.generateFilename();
-
-            const exports = [];
-
-            if (exportConfig.csv) {
-                exports.push(this.sendMessage({
-                    action: 'exportData',
-                    data: data,
-                    format: 'csv',
-                    filename: `${baseFilename}.csv`
-                }));
-            }
-
-            if (exportConfig.markdown) {
-                exports.push(this.sendMessage({
-                    action: 'exportData',
-                    data: data,
-                    format: 'markdown',
-                    filename: `${baseFilename}.md`
-                }));
-            }
-
-            if (exportConfig.json) {
-                exports.push(this.sendMessage({
-                    action: 'exportData',
-                    data: data,
-                    format: 'json',
-                    filename: `${baseFilename}.json`
-                }));
-            }
-
-            await Promise.all(exports);
-            this.showNotification('数据导出成功', 'success');
-
-        } catch (error) {
-            console.error('导出数据失败:', error);
-            this.showNotification('导出数据失败: ' + error.message, 'error');
-        }
-    }
-
-    generateFilename() {
-        const pattern = this.config.export.filenamePattern;
-        const now = new Date();
-        
-        return pattern
-            .replace('{platform}', this.currentPlatform.name)
-            .replace('{title}', this.sanitizeFilename(this.currentTab.title))
-            .replace('{date}', now.toISOString().split('T')[0])
-            .replace('{time}', now.toTimeString().split(' ')[0].replace(/:/g, '-'));
-    }
-
-    sanitizeFilename(filename) {
-        return filename.replace(/[<>:"/\\|?*]/g, '_').substring(0, 50);
     }
 
     async sendMessage(message) {
