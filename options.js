@@ -61,8 +61,40 @@ class CommentInsightOptions {
             document.getElementById('temperature-value').textContent = event.target.value;
         });
 
+        // 端点选择器变化事件
+        document.getElementById('ai-endpoint-select').addEventListener('change', (event) => {
+            this.toggleCustomEndpointInput();
+        });
+
+        // 导出包含评论选项变化事件
+        document.getElementById('export-include-comments').addEventListener('change', (event) => {
+            this.toggleExportCommentsSort();
+        });
+
         // 实时保存配置
         this.setupAutoSave();
+    }
+
+    toggleCustomEndpointInput() {
+        const select = document.getElementById('ai-endpoint-select');
+        const customInput = document.getElementById('ai-endpoint-custom');
+        
+        if (select.value === 'custom') {
+            customInput.style.display = 'block';
+        } else {
+            customInput.style.display = 'none';
+        }
+    }
+
+    toggleExportCommentsSort() {
+        const checkbox = document.getElementById('export-include-comments');
+        const container = document.getElementById('export-comments-sort-container');
+        
+        if (checkbox.checked) {
+            container.classList.remove('hidden');
+        } else {
+            container.classList.add('hidden');
+        }
     }
 
     setupAutoSave() {
@@ -138,13 +170,13 @@ class CommentInsightOptions {
                 twitter: {
                     bearerToken: '',
                     apiVersion: 'v2'
+                },
+                // 公共配置
+                maxComments: 100,
+                export: {
+                    includeComments: false,
+                    commentsSort: 'timestamp-desc'
                 }
-            },
-            export: {
-                csv: true,
-                markdown: true,
-                json: false,
-                filenamePattern: '{platform}_{title}_{date}'
             }
         };
     }
@@ -152,7 +184,24 @@ class CommentInsightOptions {
     async populateForm() {
         try {
             // AI配置
-            document.getElementById('ai-endpoint').value = this.config.ai.endpoint || '';
+            const endpointSelect = document.getElementById('ai-endpoint-select');
+            const customEndpointInput = document.getElementById('ai-endpoint-custom');
+            
+            // 处理端点选择
+            if (this.config.ai.endpoint === 'https://api.openai.com/v1' ||
+                this.config.ai.endpoint === 'https://openrouter.ai/api/v1' ||
+                this.config.ai.endpoint === 'https://api.siliconflow.cn/v1' ||
+                this.config.ai.endpoint === 'https://open.bigmodel.cn/api/paas/v4' ||
+                this.config.ai.endpoint === 'https://api.deepseek.com/v1' ||
+                this.config.ai.endpoint === 'https://api.moonshot.cn/v1') {
+                endpointSelect.value = this.config.ai.endpoint;
+                customEndpointInput.style.display = 'none';
+            } else {
+                endpointSelect.value = 'custom';
+                customEndpointInput.value = this.config.ai.endpoint || '';
+                customEndpointInput.style.display = 'block';
+            }
+            
             document.getElementById('ai-api-key').value = this.config.ai.apiKey || '';
             document.getElementById('ai-model').value = this.config.ai.model || '';
             document.getElementById('ai-temperature').value = this.config.ai.temperature || 0.7;
@@ -171,7 +220,8 @@ class CommentInsightOptions {
             // 平台配置
             // YouTube
             document.getElementById('youtube-api-key').value = this.config.platforms.youtube.apiKey || '';
-            document.getElementById('youtube-max-comments').value = this.config.platforms.youtube.maxComments || 100;
+            // 使用公共配置的最大评论数
+            document.getElementById('platform-max-comments').value = this.config.platforms.maxComments || 100;
 
             // TikTok
             document.getElementById('tiktok-mode').value = this.config.platforms.tiktok.mode || 'dom';
@@ -189,11 +239,13 @@ class CommentInsightOptions {
             document.getElementById('twitter-bearer-token').value = this.config.platforms.twitter.bearerToken || '';
             document.getElementById('twitter-api-version').value = this.config.platforms.twitter.apiVersion || 'v2';
 
-            // 导出设置
-            document.getElementById('export-csv').checked = this.config.export.csv || false;
-            document.getElementById('export-markdown').checked = this.config.export.markdown || false;
-            document.getElementById('export-json').checked = this.config.export.json || false;
-            document.getElementById('export-filename-pattern').value = this.config.export.filenamePattern || '{platform}_{title}_{date}';
+            // 导出配置
+            const exportConfig = this.config.platforms.export || {};
+            document.getElementById('export-include-comments').checked = exportConfig.includeComments || false;
+            document.getElementById('export-comments-sort').value = exportConfig.commentsSort || 'timestamp-desc';
+            
+            // 根据是否包含评论来显示/隐藏排序选项
+            this.toggleExportCommentsSort();
 
         } catch (error) {
             console.error('填充表单失败:', error);
@@ -202,9 +254,18 @@ class CommentInsightOptions {
     }
 
     collectFormData() {
+        // 获取端点值
+        let endpointValue;
+        const endpointSelect = document.getElementById('ai-endpoint-select');
+        if (endpointSelect.value === 'custom') {
+            endpointValue = document.getElementById('ai-endpoint-custom').value.trim();
+        } else {
+            endpointValue = endpointSelect.value;
+        }
+        
         return {
             ai: {
-                endpoint: document.getElementById('ai-endpoint').value.trim(),
+                endpoint: endpointValue,
                 apiKey: document.getElementById('ai-api-key').value.trim(),
                 model: document.getElementById('ai-model').value.trim(),
                 temperature: parseFloat(document.getElementById('ai-temperature').value),
@@ -214,7 +275,7 @@ class CommentInsightOptions {
             platforms: {
                 youtube: {
                     apiKey: document.getElementById('youtube-api-key').value.trim(),
-                    maxComments: parseInt(document.getElementById('youtube-max-comments').value)
+                    maxComments: parseInt(document.getElementById('platform-max-comments').value)
                 },
                 tiktok: {
                     mode: document.getElementById('tiktok-mode').value,
@@ -231,13 +292,13 @@ class CommentInsightOptions {
                 twitter: {
                     bearerToken: document.getElementById('twitter-bearer-token').value.trim(),
                     apiVersion: document.getElementById('twitter-api-version').value
+                },
+                // 公共配置
+                maxComments: parseInt(document.getElementById('platform-max-comments').value),
+                export: {
+                    includeComments: document.getElementById('export-include-comments').checked,
+                    commentsSort: document.getElementById('export-comments-sort').value
                 }
-            },
-            export: {
-                csv: document.getElementById('export-csv').checked,
-                markdown: document.getElementById('export-markdown').checked,
-                json: document.getElementById('export-json').checked,
-                filenamePattern: document.getElementById('export-filename-pattern').value.trim()
             }
         };
     }
@@ -286,14 +347,30 @@ class CommentInsightOptions {
             return false;
         }
 
-        if (config.platforms.youtube.maxComments < 10 || config.platforms.youtube.maxComments > 1000) {
-            this.showStatus('YouTube最大评论数必须在10-1000之间', 'error');
+        // 使用公共配置的最大评论数验证
+        if (config.platforms.maxComments < 10 || config.platforms.maxComments > 1000) {
+            this.showStatus('最大评论数必须在10-1000之间', 'error');
             return false;
         }
 
         if (config.platforms.tiktok.delay < 500 || config.platforms.tiktok.delay > 5000) {
             this.showStatus('TikTok延迟设置必须在500-5000ms之间', 'error');
             return false;
+        }
+
+        // 验证自定义端点
+        if (document.getElementById('ai-endpoint-select').value === 'custom') {
+            const customEndpoint = document.getElementById('ai-endpoint-custom').value.trim();
+            if (!customEndpoint) {
+                this.showStatus('请输入自定义API端点', 'error');
+                return false;
+            }
+            try {
+                new URL(customEndpoint);
+            } catch (e) {
+                this.showStatus('自定义API端点格式不正确', 'error');
+                return false;
+            }
         }
 
         return true;
@@ -305,8 +382,16 @@ class CommentInsightOptions {
             const testResult = document.getElementById('ai-test-result');
             
             // 获取当前AI配置
+            let endpointValue;
+            const endpointSelect = document.getElementById('ai-endpoint-select');
+            if (endpointSelect.value === 'custom') {
+                endpointValue = document.getElementById('ai-endpoint-custom').value.trim();
+            } else {
+                endpointValue = endpointSelect.value;
+            }
+            
             const aiConfig = {
-                endpoint: document.getElementById('ai-endpoint').value.trim(),
+                endpoint: endpointValue,
                 apiKey: document.getElementById('ai-api-key').value.trim(),
                 model: document.getElementById('ai-model').value.trim() || 'gpt-3.5-turbo'
             };
@@ -356,8 +441,16 @@ class CommentInsightOptions {
             const modelSelect = document.getElementById('ai-model');
 
             // 获取当前AI配置
+            let endpointValue;
+            const endpointSelect = document.getElementById('ai-endpoint-select');
+            if (endpointSelect.value === 'custom') {
+                endpointValue = document.getElementById('ai-endpoint-custom').value.trim();
+            } else {
+                endpointValue = endpointSelect.value;
+            }
+
             const aiConfig = {
-                endpoint: document.getElementById('ai-endpoint').value.trim(),
+                endpoint: endpointValue,
                 apiKey: document.getElementById('ai-api-key').value.trim()
             };
 
@@ -440,10 +533,16 @@ class CommentInsightOptions {
             
             if (response.success && response.data) {
                 const cache = response.data;
-                const currentEndpoint = document.getElementById('ai-endpoint').value.trim();
+                let endpointValue;
+                const endpointSelect = document.getElementById('ai-endpoint-select');
+                if (endpointSelect.value === 'custom') {
+                    endpointValue = document.getElementById('ai-endpoint-custom').value.trim();
+                } else {
+                    endpointValue = endpointSelect.value;
+                }
                 
                 // 检查缓存是否有效（同一端点且在24小时内）
-                const isValidCache = cache.endpoint === currentEndpoint &&
+                const isValidCache = cache.endpoint === endpointValue &&
                                   cache.models &&
                                   cache.timestamp &&
                                   (Date.now() - cache.timestamp) < 24 * 60 * 60 * 1000;
@@ -583,14 +682,15 @@ class CommentInsightOptions {
                 tiktok: ['mode', 'delay'],
                 instagram: [],
                 facebook: [],
-                twitter: ['apiVersion']
-            },
-            export: ['csv', 'markdown', 'json', 'filenamePattern']
+                twitter: ['apiVersion'],
+                maxComments: [], // 公共配置
+                export: ['includeComments', 'commentsSort'] // 导出配置
+            }
         };
 
         try {
             // 检查顶级结构
-            if (!config.ai || !config.platforms || !config.export) {
+            if (!config.ai || !config.platforms) {
                 return false;
             }
 
@@ -603,20 +703,31 @@ class CommentInsightOptions {
 
             // 检查平台配置
             for (const [platform, fields] of Object.entries(requiredStructure.platforms)) {
-                if (!config.platforms[platform]) {
-                    return false;
-                }
-                for (const field of fields) {
-                    if (!(field in config.platforms[platform])) {
+                if (platform === 'export') {
+                    // 特殊处理导出配置
+                    if (!config.platforms.export) {
                         return false;
                     }
-                }
-            }
-
-            // 检查导出配置
-            for (const field of requiredStructure.export) {
-                if (!(field in config.export)) {
-                    return false;
+                    for (const field of fields) {
+                        if (!(field in config.platforms.export)) {
+                            return false;
+                        }
+                    }
+                } else if (platform === 'maxComments') {
+                    // 特殊处理公共配置
+                    if (!(platform in config.platforms)) {
+                        return false;
+                    }
+                } else {
+                    // 处理平台特定配置
+                    if (!config.platforms[platform]) {
+                        return false;
+                    }
+                    for (const field of fields) {
+                        if (!(field in config.platforms[platform])) {
+                            return false;
+                        }
+                    }
                 }
             }
 
@@ -687,4 +798,4 @@ class CommentInsightOptions {
 // 当DOM加载完成时初始化配置页面
 document.addEventListener('DOMContentLoaded', () => {
     new CommentInsightOptions();
-}); 
+});

@@ -96,13 +96,9 @@ class CommentInsightPopup {
                 instagram: { token: '', appId: '' },
                 facebook: { appId: '', appSecret: '' },
                 twitter: { bearerToken: '', apiVersion: 'v2' },
-                bilibili: { mode: 'dom', delay: 1000, maxScrolls: 20 }
-            },
-            export: {
-                csv: true,
-                markdown: true,
-                json: false,
-                filenamePattern: '{platform}_{title}_{date}'
+                bilibili: { mode: 'dom', delay: 1000, maxScrolls: 20 },
+                // 公共配置
+                maxComments: 100
             }
         };
     }
@@ -509,4 +505,4 @@ class CommentInsightPopup {
 // 当DOM加载完成时初始化弹出窗口
 document.addEventListener('DOMContentLoaded', () => {
     new CommentInsightPopup();
-}); 
+});

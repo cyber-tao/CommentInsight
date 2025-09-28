@@ -751,32 +751,42 @@ class CommentInsightViewer {
         );
 
         const response = await this.sendMessage({
-            action: 'exportData',
+            action: 'exportComments',
             data: data,
-            format: 'csv',
             filename: filename
         });
 
         if (response.success) {
-            this.showNotification('评论数据已导出', 'success');
+            this.showNotification('评论已导出', 'success');
         } else {
-            this.showNotification('导出失败: ' + (response.error || '未知错误'), 'error');
+            throw new Error(response.error || '导出失败');
         }
     }
 
     async exportAnalysis() {
-        if (!this.currentData.analysis) {
-            this.showNotification('没有分析数据可导出', 'warning');
+        if (!this.currentData || !this.currentData.analysis) {
+            this.showNotification('没有可导出的分析数据', 'warning');
             return;
         }
 
+        // 获取导出配置
+        const configResponse = await this.sendMessage({
+            action: 'getConfig'
+        });
+        
+        const config = configResponse.success ? configResponse.data : {};
+        const platformConfig = config.platforms || {};
+        const exportConfig = platformConfig.export || {};
+
         const data = {
             analysis: this.currentData.analysis,
-            comments: this.filteredComments,  // 添加评论数据
             platform: this.currentData.platform,
             title: this.currentData.title,
             timestamp: this.currentData.timestamp,
-            commentCount: this.filteredComments.length  // 显式添加评论数量
+            // 根据配置决定是否包含评论详情
+            includeComments: exportConfig.includeComments !== false, // 默认包含
+            sortMethod: exportConfig.commentsSort || 'timestamp-desc', // 默认按时间倒序
+            comments: exportConfig.includeComments !== false ? (this.currentData.comments || []) : []
         };
 
         const filename = this.generateFilename(
@@ -786,122 +796,150 @@ class CommentInsightViewer {
         );
 
         const response = await this.sendMessage({
-            action: 'exportData',
+            action: 'exportAnalysis',
             data: data,
-            format: 'markdown',
             filename: filename
         });
 
         if (response.success) {
-            this.showNotification('分析报告已导出', 'success');
+            this.showNotification('分析结果已导出', 'success');
         } else {
-            this.showNotification('导出失败: ' + (response.error || '未知错误'), 'error');
+            throw new Error(response.error || '导出失败');
         }
     }
 
     async exportHistory() {
-        const data = {
-            history: this.currentData.history,
-            exportTimestamp: new Date().toISOString()
-        };
+        if (!this.currentData || !this.currentData.history) {
+            this.showNotification('没有可导出的历史数据', 'warning');
+            return;
+        }
 
-        const filename = this.generateFilename(
-            'history',
-            '历史记录',
-            'json'
-        );
+        const filename = `历史记录-${new Date().toLocaleDateString('zh-CN').replace(/[^\d]/g, '-')}.json`;
 
         const response = await this.sendMessage({
-            action: 'exportData',
-            data: data,
-            format: 'json',
+            action: 'exportHistory',
+            data: this.currentData.history,
             filename: filename
         });
 
         if (response.success) {
             this.showNotification('历史记录已导出', 'success');
         } else {
-            this.showNotification('导出失败: ' + (response.error || '未知错误'), 'error');
+            throw new Error(response.error || '导出失败');
         }
-    }
-
-    showLoading(show) {
-        const overlay = document.getElementById('loading-overlay');
-        if (show) {
-            overlay.classList.remove('hidden');
-        } else {
-            overlay.classList.add('hidden');
-        }
-    }
-
-    showConfirmDialog(title, message, callback) {
-        document.getElementById('confirm-title').textContent = title;
-        document.getElementById('confirm-message').textContent = message;
-        document.getElementById('confirm-dialog').classList.remove('hidden');
-        this.confirmCallback = callback;
-    }
-
-    hideConfirmDialog() {
-        document.getElementById('confirm-dialog').classList.add('hidden');
-        this.confirmCallback = null;
-    }
-
-    showNotification(message, type = 'info') {
-        const notification = document.getElementById('notification');
-        const notificationText = document.getElementById('notification-text');
-        
-        notificationText.textContent = message;
-        
-        // 设置样式
-        notification.className = `fixed top-4 right-4 p-3 rounded-lg shadow-lg transform transition-transform duration-300 z-40`;
-        
-        switch (type) {
-            case 'success':
-                notification.classList.add('bg-green-500', 'text-white');
-                break;
-            case 'warning':
-                notification.classList.add('bg-yellow-500', 'text-white');
-                break;
-            case 'error':
-                notification.classList.add('bg-red-500', 'text-white');
-                break;
-            default:
-                notification.classList.add('bg-blue-500', 'text-white');
-        }
-        
-        // 显示通知
-        notification.style.transform = 'translateX(0)';
-        
-        // 3秒后隐藏
-        setTimeout(() => {
-            notification.style.transform = 'translateX(100%)';
-            setTimeout(() => {
-                notification.className = notification.className.replace(/bg-\w+-500/g, '');
-            }, 300);
-        }, 3000);
     }
 
     async sendMessage(message) {
-        return new Promise((resolve) => {
-            chrome.runtime.sendMessage(message, (response) => {
-                resolve(response || { success: false, error: 'No response' });
+        return new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage(message, response => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                } else {
+                    resolve(response);
+                }
             });
         });
     }
 
-    // 为历史记录按钮添加事件监听器
+    showLoading(show) {
+        const loader = document.getElementById('loading-spinner');
+        if (loader) {
+            loader.classList.toggle('hidden', !show);
+        }
+    }
+
+    showNotification(message, type = 'info') {
+        const notification = document.getElementById('notification');
+        const notificationMessage = document.getElementById('notification-message');
+        const notificationIcon = document.getElementById('notification-icon');
+
+        if (!notification || !notificationMessage || !notificationIcon) return;
+
+        // 设置消息内容
+        notificationMessage.textContent = message;
+
+        // 设置图标和样式
+        notification.className = 'fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg transform transition-all duration-300 ease-in-out';
+        notification.classList.remove('translate-x-full', 'opacity-0');
+
+        switch (type) {
+            case 'success':
+                notification.className += ' bg-green-100 border border-green-400 text-green-700';
+                notificationIcon.innerHTML = `
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                    </svg>
+                `;
+                break;
+            case 'error':
+                notification.className += ' bg-red-100 border border-red-400 text-red-700';
+                notificationIcon.innerHTML = `
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                    </svg>
+                `;
+                break;
+            case 'warning':
+                notification.className += ' bg-yellow-100 border border-yellow-400 text-yellow-700';
+                notificationIcon.innerHTML = `
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                    </svg>
+                `;
+                break;
+            default:
+                notification.className += ' bg-blue-100 border border-blue-400 text-blue-700';
+                notificationIcon.innerHTML = `
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+                    </svg>
+                `;
+        }
+
+        // 显示通知
+        notification.classList.remove('translate-x-full', 'opacity-0');
+
+        // 3秒后自动隐藏
+        setTimeout(() => {
+            notification.classList.add('translate-x-full', 'opacity-0');
+        }, 3000);
+    }
+
+    showConfirmDialog(title, message, callback) {
+        const dialog = document.getElementById('confirm-dialog');
+        const dialogTitle = document.getElementById('confirm-title');
+        const dialogMessage = document.getElementById('confirm-message');
+
+        if (!dialog || !dialogTitle || !dialogMessage) return;
+
+        dialogTitle.textContent = title;
+        dialogMessage.textContent = message;
+
+        this.confirmCallback = callback;
+
+        dialog.classList.remove('hidden');
+    }
+
+    hideConfirmDialog() {
+        const dialog = document.getElementById('confirm-dialog');
+        if (dialog) {
+            dialog.classList.add('hidden');
+        }
+        this.confirmCallback = null;
+    }
+
     attachHistoryButtonEvents() {
-        // 为"查看"按钮添加事件监听器
-        document.querySelectorAll('.view-history-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+        // 为查看按钮添加事件监听器
+        document.querySelectorAll('.view-history-btn').forEach(button => {
+            button.addEventListener('click', (e) => {
                 const itemId = e.target.getAttribute('data-item-id');
                 this.openHistoryItem(itemId);
             });
         });
 
-        // 为"删除"按钮添加事件监听器
-        document.querySelectorAll('.delete-history-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+        // 为删除按钮添加事件监听器
+        document.querySelectorAll('.delete-history-btn').forEach(button => {
+            button.addEventListener('click', (e) => {
                 const itemId = e.target.getAttribute('data-item-id');
                 this.deleteHistoryItem(itemId);
             });
@@ -909,10 +947,11 @@ class CommentInsightViewer {
     }
 }
 
-// 全局变量，便于在HTML中调用方法
-let viewer;
+// 创建全局实例
+const viewer = new CommentInsightViewer();
 
-// 当DOM加载完成时初始化查看器
-document.addEventListener('DOMContentLoaded', () => {
-    viewer = new CommentInsightViewer();
-}); 
+// 将 goToPage 方法添加到全局作用域，以便在 HTML 中调用
+window.viewer = viewer;
+window.goToPage = function(page) {
+    viewer.goToPage(page);
+};

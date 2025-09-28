@@ -60,13 +60,13 @@ class CommentInsightBackground {
                     mode: 'dom',
                     delay: 1000,
                     maxScrolls: 20
+                },
+                // 公共配置
+                maxComments: 100,
+                export: {
+                    includeComments: false,
+                    commentsSort: 'timestamp-desc'
                 }
-            },
-            export: {
-                csv: true,
-                markdown: true,
-                json: false,
-                filenamePattern: '{platform}_{title}_{date}'
             }
         };
 
@@ -120,6 +120,42 @@ class CommentInsightBackground {
                     try {
                         await this.exportData(message.data, message.format, message.filename);
                         sendResponse({ success: true });
+                    } catch (error) {
+                        sendResponse({ success: false, error: error.message });
+                    }
+                    break;
+
+                case 'exportAnalysis':
+                    try {
+                        await this.exportData(message.data, 'markdown', message.filename);
+                        sendResponse({ success: true });
+                    } catch (error) {
+                        sendResponse({ success: false, error: error.message });
+                    }
+                    break;
+
+                case 'exportComments':
+                    try {
+                        await this.exportData(message.data, 'csv', message.filename);
+                        sendResponse({ success: true });
+                    } catch (error) {
+                        sendResponse({ success: false, error: error.message });
+                    }
+                    break;
+
+                case 'exportHistory':
+                    try {
+                        await this.exportData(message.data, 'json', message.filename);
+                        sendResponse({ success: true });
+                    } catch (error) {
+                        sendResponse({ success: false, error: error.message });
+                    }
+                    break;
+
+                case 'getConfig':
+                    try {
+                        const config = await this.loadData('config');
+                        sendResponse({ success: true, data: config });
                     } catch (error) {
                         sendResponse({ success: false, error: error.message });
                     }
@@ -210,7 +246,8 @@ class CommentInsightBackground {
             throw new Error('YouTube API密钥未配置');
         }
 
-        const targetCount = config.platforms.youtube.maxComments || 100;
+        // 使用公共配置的最大评论数
+        const targetCount = config.platforms.maxComments || 100;
 
         try {
             let pageToken = '';
@@ -761,9 +798,28 @@ class CommentInsightBackground {
             markdown += `\n\n`;
         }
 
-        if (data.comments && data.comments.length > 0) {
+        // 检查是否需要包含评论以及如何排序
+        if (data.includeComments && data.comments && data.comments.length > 0) {
+            // 对评论进行排序
+            let sortedComments = [...data.comments];
+            switch (data.sortMethod) {
+                case 'timestamp-asc':
+                    sortedComments.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                    break;
+                case 'likes-desc':
+                    sortedComments.sort((a, b) => (b.likes || 0) - (a.likes || 0));
+                    break;
+                case 'likes-asc':
+                    sortedComments.sort((a, b) => (a.likes || 0) - (b.likes || 0));
+                    break;
+                case 'timestamp-desc':
+                default:
+                    sortedComments.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                    break;
+            }
+
             markdown += `## 评论详情\n\n`;
-            data.comments.forEach((comment, index) => {
+            sortedComments.forEach((comment, index) => {
                 markdown += `### 评论 ${index + 1}\n`;
                 markdown += `**作者**: ${this.escapeMarkdownText(comment.author || '匿名')}\n`;
                 markdown += `**时间**: ${this.escapeMarkdownText(comment.timestamp || '未知')}\n`;

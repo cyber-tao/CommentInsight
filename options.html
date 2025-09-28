@@ -8,6 +8,7 @@
     <style>
         .loading { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .custom-endpoint { display: none; }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
@@ -43,9 +44,19 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-2">API端点</label>
-                    <input type="url" id="ai-endpoint" placeholder="https://api.openai.com/v1" 
-                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">支持OpenAI兼容的API</p>
+                    <select id="ai-endpoint-select" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="https://api.openai.com/v1">OpenAI (api.openai.com)</option>
+                        <option value="https://openrouter.ai/api/v1">OpenRouter (openrouter.ai)</option>
+                        <option value="https://api.siliconflow.cn/v1">SiliconFlow (api.siliconflow.cn)</option>
+                        <option value="https://open.bigmodel.cn/api/paas/v4">ChatGLM (open.bigmodel.cn)</option>
+                        <option value="https://api.deepseek.com/v1">DeepSeek (api.deepseek.com)</option>
+                        <option value="https://api.moonshot.cn/v1">Kimi (api.moonshot.cn)</option>
+                        <option value="custom">自定义端点</option>
+                    </select>
+                    <input type="url" id="ai-endpoint-custom" placeholder="https://your-api-endpoint.com/v1" 
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mt-2 custom-endpoint"
+                           style="display: none;">
+                    <p class="text-xs text-gray-500 mt-1">选择或输入支持OpenAI兼容API的端点</p>
                 </div>
                 
                 <div>
@@ -116,6 +127,36 @@
             </h2>
             
             <div class="space-y-6">
+                <!-- 公共配置 -->
+                <div class="border-l-4 border-purple-500 pl-4">
+                    <h3 class="font-semibold text-lg flex items-center">
+                        <span class="mr-2">⚙️</span> 公共配置
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">最大评论数</label>
+                            <input type="number" id="platform-max-comments" value="100" min="10" max="1000" 
+                                   class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">导出分析时包含评论</label>
+                            <div class="flex items-center mt-1">
+                                <input type="checkbox" id="export-include-comments" class="mr-2">
+                                <span class="text-sm">在Markdown分析报告中包含评论详情</span>
+                            </div>
+                        </div>
+                        <div id="export-comments-sort-container" class="hidden">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">评论排序方式</label>
+                            <select id="export-comments-sort" class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                <option value="timestamp-desc">时间倒序</option>
+                                <option value="timestamp-asc">时间正序</option>
+                                <option value="likes-desc">点赞数降序</option>
+                                <option value="likes-asc">点赞数升序</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- YouTube -->
                 <div class="border-l-4 border-red-500 pl-4">
                     <h3 class="font-semibold text-lg flex items-center">
@@ -125,11 +166,6 @@
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">API密钥</label>
                             <input type="password" id="youtube-api-key" placeholder="YouTube Data API v3密钥" 
-                                   class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-red-500 focus:border-red-500">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">最大评论数</label>
-                            <input type="number" id="youtube-max-comments" value="100" min="10" max="1000" 
                                    class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-red-500 focus:border-red-500">
                         </div>
                     </div>
@@ -217,41 +253,6 @@
             </div>
         </div>
 
-        <!-- 导出设置 -->
-        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h2 class="text-xl font-semibold mb-4 flex items-center">
-                <span class="bg-purple-100 text-purple-600 p-2 rounded-full mr-3">📤</span>
-                导出设置
-            </h2>
-            
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">默认导出格式</label>
-                    <div class="space-y-2">
-                        <label class="flex items-center">
-                            <input type="checkbox" id="export-csv" checked class="mr-2">
-                            <span>CSV格式（评论数据）</span>
-                        </label>
-                        <label class="flex items-center">
-                            <input type="checkbox" id="export-markdown" checked class="mr-2">
-                            <span>Markdown格式（分析报告）</span>
-                        </label>
-                        <label class="flex items-center">
-                            <input type="checkbox" id="export-json" class="mr-2">
-                            <span>JSON格式（完整数据）</span>
-                        </label>
-                    </div>
-                </div>
-                
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">文件命名规则</label>
-                    <input type="text" id="export-filename-pattern" value="{platform}_{title}_{date}" 
-                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                    <p class="text-xs text-gray-500 mt-1">支持变量: {platform}, {title}, {date}, {time}</p>
-                </div>
-            </div>
-        </div>
-
         <!-- 状态栏 -->
         <div id="status-bar" class="fixed bottom-4 right-4 bg-white shadow-lg rounded-lg p-4 max-w-sm hidden">
             <div class="flex items-center space-x-2">
@@ -266,4 +267,4 @@
 
     <script src="options.js"></script>
 </body>
-</html> 
+</html>
