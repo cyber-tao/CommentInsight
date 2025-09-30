@@ -152,8 +152,7 @@ class CommentInsightOptions {
             },
             platforms: {
                 youtube: {
-                    apiKey: '',
-                    maxComments: 100
+                    apiKey: ''
                 },
                 tiktok: {
                     mode: 'dom',
@@ -242,6 +241,7 @@ class CommentInsightOptions {
             // 导出配置
             const exportConfig = this.config.platforms.export || {};
             document.getElementById('export-include-comments').checked = exportConfig.includeComments || false;
+            document.getElementById('export-include-thinking').checked = exportConfig.includeThinking || false;
             document.getElementById('export-comments-sort').value = exportConfig.commentsSort || 'timestamp-desc';
             
             // 根据是否包含评论来显示/隐藏排序选项
@@ -274,8 +274,7 @@ class CommentInsightOptions {
             },
             platforms: {
                 youtube: {
-                    apiKey: document.getElementById('youtube-api-key').value.trim(),
-                    maxComments: parseInt(document.getElementById('platform-max-comments').value)
+                    apiKey: document.getElementById('youtube-api-key').value.trim()
                 },
                 tiktok: {
                     mode: document.getElementById('tiktok-mode').value,
@@ -297,6 +296,7 @@ class CommentInsightOptions {
                 maxComments: parseInt(document.getElementById('platform-max-comments').value),
                 export: {
                     includeComments: document.getElementById('export-include-comments').checked,
+                    includeThinking: document.getElementById('export-include-thinking').checked,
                     commentsSort: document.getElementById('export-comments-sort').value
                 }
             }

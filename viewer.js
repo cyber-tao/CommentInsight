@@ -469,9 +469,12 @@ class CommentInsightViewer {
         }
 
         const analysis = this.currentData.analysis;
+        
+        // 直接渲染分析结果，让markdownToHtml处理思考内容
+        const analysisContent = this.markdownToHtml(analysis.rawAnalysis || '暂无分析结果');
 
-        // 渲染分析内容（先转义后有限Markdown渲染）
-        contentElement.innerHTML = this.markdownToHtml(analysis.rawAnalysis || '暂无分析结果');
+        // 渲染分析内容
+        contentElement.innerHTML = analysisContent;
 
         // 渲染元数据
         document.getElementById('analysis-timestamp').textContent = 
@@ -486,22 +489,140 @@ class CommentInsightViewer {
 
     markdownToHtml(markdown) {
         // 先转义以避免XSS，再进行有限Markdown转换
-        const safe = this.escapeHtml(markdown || '');
-        return safe
-            .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-            .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-            .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-            .replace(/^\* (.*$)/gim, '<li>$1</li>')
-            .replace(/^- (.*$)/gim, '<li>$1</li>')
-            .replace(/^\d+\. (.*$)/gim, '<li>$1</li>')
-            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-            .replace(/\*(.*?)\*/g, '<em>$1</em>')
-            .replace(/\n\n/g, '</p><p>')
-            .replace(/^(?!<[hlu])/gm, '<p>')
-            .replace(/(?<![hlu]>)$/gm, '</p>')
-            .replace(/<li>/g, '<ul><li>')
-            .replace(/<\/li>/g, '</li></ul>')
-            .replace(/<\/ul><ul>/g, '');
+        let safe = this.escapeHtml(markdown || '');
+        
+        // 处理<br>标签 - 先替换为临时标记，避免被转义
+        safe = safe.replace(/&lt;br&gt;/g, '<br>');
+        safe = safe.replace(/&lt;br\/&gt;/g, '<br>');
+        
+        // 处理表格 - 查找以 | 开头的行并转换为表格
+        // 使用更稳健的方法处理表格
+        const lines = safe.split('\n');
+        const processedLines = [];
+        let i = 0;
+        
+        while (i < lines.length) {
+            const line = lines[i].trim();
+            
+            // 检查是否是表格开始 (以 | 开头和结尾，且包含至少3个 |)
+            if (line.startsWith('|') && line.endsWith('|') && (line.match(/\|/g) || []).length >= 3) {
+                const tableLines = [];
+                
+                // 收集连续的表格行
+                while (i < lines.length) {
+                    const currentLine = lines[i].trim();
+                    if (currentLine.startsWith('|') && currentLine.endsWith('|') && (currentLine.match(/\|/g) || []).length >= 3) {
+                        tableLines.push(currentLine);
+                        i++;
+                    } else {
+                        // 检查是否是分隔行 (由 - 和 : 组成)
+                        if (currentLine.startsWith('|') && currentLine.endsWith('|') && 
+                            currentLine.substring(1, currentLine.length - 1).split('|').every(cell => 
+                                cell.trim() === '' || /^[-: ]+$/.test(cell.trim()))) {
+                            // 这是分隔行，跳过
+                            i++;
+                            continue;
+                        }
+                        break;
+                    }
+                }
+                
+                // 转换表格行
+                if (tableLines.length >= 1) {
+                    const tableHtml = this.convertMarkdownTableToHtml(tableLines);
+                    processedLines.push(tableHtml);
+                } else {
+                    // 如果不是有效表格，按普通行处理
+                    processedLines.push(lines[i]);
+                    i++;
+                }
+            } else {
+                // 普通行
+                processedLines.push(lines[i]);
+                i++;
+            }
+        }
+        
+        safe = processedLines.join('\n');
+        
+        // 处理<think>标签（AI思考内容）- 在查看页面显示为可折叠内容
+        safe = safe.replace(/&lt;think&gt;/g, '<details class="mb-4 border border-gray-200 rounded-lg"><summary class="cursor-pointer p-3 bg-gray-50 font-medium">AI思考过程</summary><div class="p-3 border-t border-gray-200">');
+        safe = safe.replace(/&lt;\/think&gt;/g, '</p></div></details>');
+        
+        // 处理details标签（用于折叠思考内容）
+        safe = safe.replace(/<details>/g, '<details class="mb-4 border border-gray-200 rounded-lg">');
+        safe = safe.replace(/<summary>(.*?)<\/summary>/g, '<summary class="cursor-pointer p-3 bg-gray-50 font-medium">$1</summary><div class="p-3 border-t border-gray-200">');
+        safe = safe.replace(/<\/details>/g, '</div></details>');
+        
+        // 处理斜体（思考内容）
+        safe = safe.replace(/\*(.*?)\*/g, '<em class="text-gray-600">$1</em>');
+        
+        // 处理粗体
+        safe = safe.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        
+        // 处理标题
+        safe = safe.replace(/^### (.*$)/gim, '<h3 class="text-lg font-semibold mt-6 mb-3">$1</h3>');
+        safe = safe.replace(/^## (.*$)/gim, '<h2 class="text-xl font-bold mt-8 mb-4">$1</h2>');
+        safe = safe.replace(/^# (.*$)/gim, '<h1 class="text-2xl font-bold mt-10 mb-5">$1</h1>');
+        
+        // 处理列表
+        safe = safe.replace(/^\* (.*$)/gim, '<li>$1</li>');
+        safe = safe.replace(/^- (.*$)/gim, '<li>$1</li>');
+        safe = safe.replace(/^\d+\. (.*$)/gim, '<li>$1</li>');
+        safe = safe.replace(/<li>/g, '<ul class="list-disc list-inside mb-2"><li>');
+        safe = safe.replace(/<\/li>/g, '</li></ul>');
+        safe = safe.replace(/<\/ul><ul class="list-disc list-inside mb-2">/g, '');
+        
+        // 处理分隔符
+        safe = safe.replace(/^-{3,}$/gm, '<hr class="my-6 border-gray-300">');
+        
+        // 处理段落
+        safe = safe.replace(/\n\n/g, '</p><p class="mb-4">');
+        safe = safe.replace(/^(?!<[hlu])/gm, '<p class="mb-4">');
+        safe = safe.replace(/(?<![hlu]>)$/gm, '</p>');
+        
+        return safe;
+    }
+
+    // 辅助函数：将Markdown表格转换为HTML表格
+    convertMarkdownTableToHtml(tableLines) {
+        if (tableLines.length < 2) return tableLines.join('\n');
+        
+        let tableHtml = '<table class="markdown-content">';
+        let hasHeader = false;
+        
+        for (let i = 0; i < tableLines.length; i++) {
+            const line = tableLines[i].trim();
+            if (!line.startsWith('|') || !line.endsWith('|')) continue;
+            
+            // 分割单元格并去除首尾空格
+            const cells = line.substring(1, line.length - 1).split('|').map(cell => cell.trim());
+            
+            // 跳过分隔行（通常是第二行，由 - 和 : 组成）
+            if (i === 1 && cells.every(cell => /^[-: ]*$/.test(cell))) {
+                continue;
+            }
+            
+            // 第一行作为表头
+            if (!hasHeader) {
+                tableHtml += '<thead><tr>';
+                cells.forEach(cell => {
+                    tableHtml += `<th>${cell}</th>`;
+                });
+                tableHtml += '</tr></thead><tbody>';
+                hasHeader = true;
+            } else {
+                // 普通数据行
+                tableHtml += '<tr>';
+                cells.forEach(cell => {
+                    tableHtml += `<td>${cell}</td>`;
+                });
+                tableHtml += '</tr>';
+            }
+        }
+        
+        tableHtml += hasHeader ? '</tbody></table>' : '</table>';
+        return tableHtml;
     }
 
     async renderHistory() {
@@ -783,10 +904,11 @@ class CommentInsightViewer {
             platform: this.currentData.platform,
             title: this.currentData.title,
             timestamp: this.currentData.timestamp,
-            // 根据配置决定是否包含评论详情
-            includeComments: exportConfig.includeComments !== false, // 默认包含
+            // 根据配置决定是否包含评论详情和思考过程
+            includeComments: exportConfig.includeComments === true, // 明确检查是否为true
+            includeThinking: exportConfig.includeThinking === true, // 明确检查是否为true
             sortMethod: exportConfig.commentsSort || 'timestamp-desc', // 默认按时间倒序
-            comments: exportConfig.includeComments !== false ? (this.currentData.comments || []) : []
+            comments: this.currentData.comments || []
         };
 
         const filename = this.generateFilename(

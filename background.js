@@ -295,7 +295,8 @@ class CommentInsightBackground {
         const patterns = [
             /(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([^&\n?#]+)/,
             /(?:https?:\/\/)?(?:www\.)?youtu\.be\/([^&\n?#]+)/,
-            /(?:https?:\/\/)?(?:www\.)?youtube\.com\/embed\/([^&\n?#]+)/
+            /(?:https?:\/\/)?(?:www\.)?youtube\.com\/embed\/([^&\n?#]+)/,
+            /(?:https?:\/\/)?(?:www\.)?youtube\.com\/shorts\/([^&\n?#]+)/
         ];
 
         for (const pattern of patterns) {
@@ -794,7 +795,23 @@ class CommentInsightBackground {
 
         if (data.analysis) {
             markdown += `## AI分析结果\n\n`;
-            markdown += data.analysis.rawAnalysis || '暂无分析结果';
+            
+            // 检查是否需要包含思考内容
+            if (data.includeThinking && data.analysis.thinkingProcess) {
+                markdown += `<details>\n<summary>AI思考过程</summary>\n\n`;
+                markdown += `${this.escapeMarkdownText(data.analysis.thinkingProcess)}\n\n`;
+                markdown += `</details>\n\n`;
+            }
+            
+            // 处理分析内容，正确处理可能存在的<think>标签
+            let analysisContent = data.analysis.rawAnalysis || '暂无分析结果';
+            
+            // 如果用户选择不包含思考过程，则移除<think>标签及其内容
+            if (!data.includeThinking) {
+                analysisContent = analysisContent.replace(/<think>.*?<\/think>/gs, '');
+            }
+            
+            markdown += analysisContent;
             markdown += `\n\n`;
         }
 

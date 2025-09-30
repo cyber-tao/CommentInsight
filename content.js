@@ -237,8 +237,8 @@ class YouTubeExtractor extends BaseExtractor {
             const commentsContainer = document.querySelector('#comments');
             await this.scrollToLoadMore(commentsContainer);
 
-            // 提取评论
-            const commentElements = document.querySelectorAll('ytd-comment-thread-renderer');
+            // 提取评论 - 支持普通视频和Shorts视频
+            const commentElements = document.querySelectorAll('ytd-comment-thread-renderer, ytd-comment-view-model');
             const comments = [];
 
             for (const element of commentElements) {
@@ -261,19 +261,53 @@ class YouTubeExtractor extends BaseExtractor {
     }
 
     extractSingleYouTubeComment(element) {
+        // 支持普通YouTube视频和Shorts视频的DOM结构
         const authorElement = element.querySelector('#author-text');
-        const contentElement = element.querySelector('#content-text');
-        const timeElement = element.querySelector('.published-time-text');
+        const contentElement = element.querySelector('#content-text') || element.querySelector('yt-attributed-string#content-text');
+        const timeElement = element.querySelector('.published-time-text') || element.querySelector('#published-time-text');
         const likesElement = element.querySelector('#vote-count-middle');
 
         if (!contentElement) return null;
 
+        // 获取作者名，支持不同结构
+        let author = '匿名';
+        if (authorElement) {
+            // 检查是否有span子元素包含作者名
+            const authorSpan = authorElement.querySelector('span');
+            author = authorSpan ? this.sanitizeText(authorSpan.textContent) : this.sanitizeText(authorElement.textContent);
+        }
+
+        // 获取评论内容，支持不同结构
+        let text = '';
+        if (contentElement) {
+            // 对于yt-attributed-string元素，需要获取其内部的span文本
+            if (contentElement.tagName === 'YT-ATTRIBUTED-STRING') {
+                const span = contentElement.querySelector('span');
+                text = span ? this.sanitizeText(span.textContent) : this.sanitizeText(contentElement.textContent);
+            } else {
+                text = this.sanitizeText(contentElement.textContent);
+            }
+        }
+
+        // 获取时间戳
+        let timestamp = new Date().toISOString();
+        if (timeElement) {
+            const timeLink = timeElement.querySelector('a');
+            timestamp = timeLink ? timeLink.textContent : timeElement.textContent;
+        }
+
+        // 获取点赞数
+        let likes = 0;
+        if (likesElement) {
+            likes = parseInt(likesElement.textContent) || 0;
+        }
+
         return {
             id: element.getAttribute('data-cid') || Date.now().toString(),
-            author: authorElement ? this.sanitizeText(authorElement.textContent) : '匿名',
-            text: this.sanitizeText(contentElement.textContent),
-            timestamp: timeElement ? timeElement.textContent : new Date().toISOString(),
-            likes: likesElement ? parseInt(likesElement.textContent) || 0 : 0,
+            author: author,
+            text: text,
+            timestamp: timestamp,
+            likes: likes,
             replies: 0 // YouTube的回复需要额外处理
         };
     }
