@@ -433,10 +433,22 @@ class CommentInsightBackground {
                 throw new Error('AI API密钥未配置');
             }
 
-            const large = comments.length > 200 || comments.map(c => c.text || '').join('').length > 8000;
-            if (large) {
-                const partials = await this.summarizeInChunks(comments, aiConfig);
-                const final = await this.finalizeSummary(partials, aiConfig);
+            // 根据maxTokens动态计算字符限制
+            // 一般来说，1个token约等于0.75个英文单词或2-3个中文字符
+            // 为了安全起见，我们使用保守估计：1 token = 2个字符
+            // 同时需要为系统提示、输出和其他开销预留空间（约30%）
+            const maxTokens = aiConfig.maxTokens || 2000;
+            const charLimitPerChunk = Math.floor(maxTokens * 2 * 0.7); // 保守估计，预留30%空间
+            
+            console.log(`模型最大令牌数: ${maxTokens}, 计算得出的字符限制: ${charLimitPerChunk}`);
+
+            const totalChars = comments.map(c => c.text || '').join('').length;
+            const needsChunking = totalChars > charLimitPerChunk;
+            
+            if (needsChunking) {
+                console.log(`触发分块分析 - 评论数: ${comments.length}, 总字符数: ${totalChars}, 字符限制: ${charLimitPerChunk}`);
+                const partials = await this.summarizeInChunks(comments, aiConfig, charLimitPerChunk);
+                const final = await this.finalizeSummary(partials, aiConfig, comments.length);
                 return {
                     rawAnalysis: final,
                     timestamp: new Date().toISOString(),
@@ -480,11 +492,14 @@ class CommentInsightBackground {
         }
     }
 
-    async summarizeInChunks(comments, aiConfig) {
+    async summarizeInChunks(comments, aiConfig, charLimit) {
         const chunks = [];
         let buffer = [];
         let charCount = 0;
-        const LIMIT = 8000;
+        
+        // 使用传入的动态字符限制
+        const LIMIT = charLimit;
+        
         for (const c of comments) {
             const t = String(c.text || '');
             if (charCount + t.length > LIMIT && buffer.length > 0) {
@@ -497,24 +512,34 @@ class CommentInsightBackground {
         }
         if (buffer.length > 0) chunks.push(buffer);
 
+        console.log(`分块分析：总共 ${comments.length} 条评论，分为 ${chunks.length} 个批次，每批次字符限制: ${LIMIT}`);
+
         const results = [];
-        for (const chunk of chunks) {
+        // 为每个批次动态分配token数量
+        // 批次分析使用较少的token（约40%的maxTokens），为最终汇总预留更多空间
+        const chunkMaxTokens = Math.floor(aiConfig.maxTokens * 0.4);
+        
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
             const chunkText = chunk.map(c => `- ${c.text}`).join('\n');
-            const prompt = '以下是部分评论，请提炼要点，输出小结（要点、情感比例、主题与显著现象）：\n\n' + chunkText;
+            const prompt = `以下是第 ${i + 1}/${chunks.length} 批评论（共 ${chunk.length} 条），请提炼要点，输出小结（要点、情感比例、主题与显著现象）：\n\n${chunkText}`;
             const data = await this.chatCompletion(aiConfig, [
                 { role: 'system', content: aiConfig.systemPrompt },
                 { role: 'user', content: prompt }
-            ], Math.max(512, Math.min(2048, aiConfig.maxTokens || 2000)));
+            ], chunkMaxTokens);
             if (!data.success) throw new Error(data.error || '分批总结失败');
             results.push(data.text);
+            console.log(`完成第 ${i + 1}/${chunks.length} 批次分析，使用token限制: ${chunkMaxTokens}`);
         }
         return results;
     }
 
-    async finalizeSummary(partials, aiConfig) {
+    async finalizeSummary(partials, aiConfig, totalComments) {
         const prompt = [
-            '将以下分批小结合并为一份完整的分析报告，避免重复，提供最终可执行建议：',
-            '',
+            `将以下分批小结合并为一份完整的分析报告，避免重复，提供最终可执行建议。`,
+            ``,
+            `**重要提示：本次分析共处理了 ${totalComments} 条评论，分为 ${partials.length} 个批次进行分析。**`,
+            ``,
             partials.map((t, i) => `【小结${i + 1}】\n${t}`).join('\n\n'),
             '',
             '请按照以下结构输出：',
@@ -806,8 +831,14 @@ class CommentInsightBackground {
             // 处理分析内容，正确处理可能存在的<think>标签
             let analysisContent = data.analysis.rawAnalysis || '暂无分析结果';
             
-            // 如果用户选择不包含思考过程，则移除<think>标签及其内容
-            if (!data.includeThinking) {
+            if (data.includeThinking) {
+                // 如果用户选择包含思考过程，将<think>标签转换为<details>折叠块
+                analysisContent = analysisContent.replace(
+                    /<think>(.*?)<\/think>/gs,
+                    '<details>\n<summary>AI思考过程</summary>\n\n$1\n\n</details>'
+                );
+            } else {
+                // 如果用户选择不包含思考过程，则移除<think>标签及其内容
                 analysisContent = analysisContent.replace(/<think>.*?<\/think>/gs, '');
             }
             
