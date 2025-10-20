@@ -44,15 +44,9 @@ class CommentInsightBackground {
                     mode: 'dom',
                     delay: 1000
                 },
-                instagram: {
-                    token: '',
-                    appId: ''
-                },
-                facebook: {
-                    appId: '',
-                    appSecret: ''
-                },
+
                 twitter: {
+                    mode: 'dom', // 'api' 或 'dom'
                     bearerToken: '',
                     apiVersion: 'v2'
                 },
@@ -183,9 +177,7 @@ class CommentInsightBackground {
             'youtube.com': 'youtube',
             'youtu.be': 'youtube',
             'tiktok.com': 'tiktok',
-            'instagram.com': 'instagram',
-            'facebook.com': 'facebook',
-            'fb.com': 'facebook',
+
             'twitter.com': 'twitter',
             'x.com': 'twitter',
             'bilibili.com': 'bilibili',
@@ -218,10 +210,7 @@ class CommentInsightBackground {
                     return await this.extractYouTubeComments(url, config);
                 case 'tiktok':
                     return await this.extractTikTokComments(url, config, tabId);
-                case 'instagram':
-                    return await this.extractInstagramComments(url, config, tabId);
-                case 'facebook':
-                    return await this.extractFacebookComments(url, config, tabId);
+
                 case 'twitter':
                     return await this.extractTwitterComments(url, config, tabId);
                 case 'bilibili':
@@ -328,70 +317,162 @@ class CommentInsightBackground {
         });
     }
 
-    async extractInstagramComments(url, config, tabId) {
-        return new Promise((resolve, reject) => {
-            const sendTo = tabId;
-            if (sendTo) {
-                chrome.tabs.sendMessage(sendTo, {
-                    action: 'extractInstagramComments',
-                    config: config
-                }, (response) => {
-                    if (chrome.runtime.lastError) {
-                        reject(new Error(chrome.runtime.lastError.message));
-                    } else if (response && response.success) {
-                        resolve(response.comments);
-                    } else {
-                        reject(new Error(response?.error || 'Instagram评论提取失败'));
-                    }
-                });
-            } else {
-                reject(new Error('未提供有效的tabId'));
-            }
-        });
-    }
 
-    async extractFacebookComments(url, config, tabId) {
-        return new Promise((resolve, reject) => {
-            const sendTo = tabId;
-            if (sendTo) {
-                chrome.tabs.sendMessage(sendTo, {
-                    action: 'extractFacebookComments',
-                    config: config
-                }, (response) => {
-                    if (chrome.runtime.lastError) {
-                        reject(new Error(chrome.runtime.lastError.message));
-                    } else if (response && response.success) {
-                        resolve(response.comments);
-                    } else {
-                        reject(new Error(response?.error || 'Facebook评论提取失败'));
-                    }
-                });
-            } else {
-                reject(new Error('未提供有效的tabId'));
-            }
-        });
-    }
 
     async extractTwitterComments(url, config, tabId) {
-        return new Promise((resolve, reject) => {
-            const sendTo = tabId;
-            if (sendTo) {
-                chrome.tabs.sendMessage(sendTo, {
-                    action: 'extractTwitterComments',
-                    config: config
-                }, (response) => {
-                    if (chrome.runtime.lastError) {
-                        reject(new Error(chrome.runtime.lastError.message));
-                    } else if (response && response.success) {
-                        resolve(response.comments);
-                    } else {
-                        reject(new Error(response?.error || 'Twitter评论提取失败'));
+        const twitterConfig = config.platforms.twitter;
+        const mode = twitterConfig.mode || 'dom';
+
+        console.log(`Twitter提取模式: ${mode}`);
+
+        if (mode === 'api') {
+            // 使用API方式提取
+            return await this.extractTwitterCommentsViaAPI(url, config);
+        } else {
+            // 使用DOM方式提取
+            return new Promise((resolve, reject) => {
+                const sendTo = tabId;
+                if (sendTo) {
+                    chrome.tabs.sendMessage(sendTo, {
+                        action: 'extractTwitterComments',
+                        config: config
+                    }, (response) => {
+                        if (chrome.runtime.lastError) {
+                            reject(new Error(chrome.runtime.lastError.message));
+                        } else if (response && response.success) {
+                            resolve(response.comments);
+                        } else {
+                            reject(new Error(response?.error || 'Twitter评论提取失败'));
+                        }
+                    });
+                } else {
+                    reject(new Error('未提供有效的tabId'));
+                }
+            });
+        }
+    }
+
+    async extractTwitterCommentsViaAPI(url, config) {
+        const twitterConfig = config.platforms.twitter;
+        const bearerToken = twitterConfig.bearerToken;
+
+        if (!bearerToken) {
+            throw new Error('Twitter API Bearer Token未配置');
+        }
+
+        // 从URL中提取推文ID
+        const tweetId = this.extractTwitterTweetId(url);
+        if (!tweetId) {
+            throw new Error('无法从URL中提取Twitter推文ID');
+        }
+
+        const maxComments = config.platforms.maxComments || 100;
+        const allComments = [];
+        let nextToken = null;
+
+        try {
+            // 使用分页获取所有评论
+            do {
+                const query = encodeURIComponent(`conversation_id:${tweetId}`);
+                let apiUrl = `https://api.twitter.com/2/tweets/search/recent?query=${query}&max_results=100&tweet.fields=created_at,public_metrics,author_id,conversation_id&expansions=author_id&user.fields=username,name`;
+
+                if (nextToken) {
+                    apiUrl += `&next_token=${nextToken}`;
+                }
+
+                console.log(`Twitter API请求 (已获取${allComments.length}条):`, apiUrl);
+
+                const response = await fetch(apiUrl, {
+                    headers: {
+                        'Authorization': `Bearer ${bearerToken}`
                     }
                 });
-            } else {
-                reject(new Error('未提供有效的tabId'));
+
+                console.log('Twitter API响应状态:', response.status);
+
+                const responseText = await response.text();
+
+                let data;
+                try {
+                    data = JSON.parse(responseText);
+                } catch (parseError) {
+                    throw new Error(`API响应不是有效的JSON: ${responseText.substring(0, 200)}`);
+                }
+
+                if (!response.ok) {
+                    const errorMsg = data.errors?.[0]?.message || data.error?.message || data.detail || data.title || 'Twitter API请求失败';
+                    throw new Error(`${errorMsg} (状态码: ${response.status})`);
+                }
+
+                const tweets = data.data || [];
+                const users = {};
+
+                // 构建用户映射
+                if (data.includes && data.includes.users) {
+                    data.includes.users.forEach(user => {
+                        users[user.id] = user;
+                    });
+                }
+
+                // 转换为统一格式
+                tweets.forEach(tweet => {
+                    // 跳过原始推文本身
+                    if (tweet.id === tweetId) return;
+
+                    const author = users[tweet.author_id];
+                    const metrics = tweet.public_metrics || {};
+
+                    allComments.push({
+                        id: tweet.id,
+                        author: author ? `@${author.username}` : '未知用户',
+                        text: tweet.text,
+                        timestamp: tweet.created_at,
+                        likes: metrics.like_count || 0,
+                        replies: metrics.reply_count || 0,
+                        retweets: metrics.retweet_count || 0
+                    });
+                });
+
+                // 获取下一页token
+                nextToken = data.meta?.next_token;
+
+                console.log(`本次获取${tweets.length}条，总计${allComments.length}条，next_token: ${nextToken ? '有' : '无'}`);
+
+                // 如果已达到目标数量，停止
+                if (allComments.length >= maxComments) {
+                    break;
+                }
+
+            } while (nextToken && allComments.length < maxComments);
+
+            const finalComments = allComments.slice(0, maxComments);
+            console.log(`通过API提取了${finalComments.length}条Twitter评论`);
+
+            if (finalComments.length === 0) {
+                console.warn('Twitter API返回了空结果，可能是：1) 推文没有回复 2) Bearer Token权限不足 3) 推文太旧（API只返回最近7天的推文）');
             }
-        });
+
+            return finalComments;
+
+        } catch (error) {
+            console.error('Twitter API提取详细错误:', error);
+            throw new Error(`Twitter API提取失败: ${error.message}`);
+        }
+    }
+
+    extractTwitterTweetId(url) {
+        // 匹配Twitter/X的推文URL格式
+        const patterns = [
+            /(?:twitter\.com|x\.com)\/\w+\/status\/(\d+)/,
+            /(?:twitter\.com|x\.com)\/i\/web\/status\/(\d+)/
+        ];
+
+        for (const pattern of patterns) {
+            const match = url.match(pattern);
+            if (match) return match[1];
+        }
+
+        return null;
     }
 
     async extractBilibiliComments(url, config, tabId) {
@@ -411,7 +492,7 @@ class CommentInsightBackground {
                 config: config
             }, (response) => {
                 clearTimeout(timeout);
-                
+
                 if (chrome.runtime.lastError) {
                     console.error('Chrome消息传递错误:', chrome.runtime.lastError);
                     reject(new Error('无法连接到页面脚本，请刷新页面后重试'));
@@ -437,14 +518,14 @@ class CommentInsightBackground {
             // 一般来说，1个token约等于0.75个英文单词或2-3个中文字符
             // 为了安全起见，我们使用保守估计：1 token = 2个字符
             // 同时需要为系统提示、输出和其他开销预留空间（约30%）
-            const maxTokens = aiConfig.maxTokens || 2000;
+            const maxTokens = aiConfig.maxTokens || 8192;
             const charLimitPerChunk = Math.floor(maxTokens * 2 * 0.7); // 保守估计，预留30%空间
-            
+
             console.log(`模型最大令牌数: ${maxTokens}, 计算得出的字符限制: ${charLimitPerChunk}`);
 
             const totalChars = comments.map(c => c.text || '').join('').length;
             const needsChunking = totalChars > charLimitPerChunk;
-            
+
             if (needsChunking) {
                 console.log(`触发分块分析 - 评论数: ${comments.length}, 总字符数: ${totalChars}, 字符限制: ${charLimitPerChunk}`);
                 const partials = await this.summarizeInChunks(comments, aiConfig, charLimitPerChunk);
@@ -458,15 +539,21 @@ class CommentInsightBackground {
                 };
             }
 
-            const commentsText = comments.map(comment => `- ${comment.text}`).join('\n');
-            const prompt = '请分析以下社交媒体评论，生成结构化的分析报告：\n\n' +
+            const commentsText = comments.map(comment => {
+                const likes = comment.likes || 0;
+                const likesText = likes > 0 ? ` [👍 ${likes}]` : '';
+                return `- ${comment.text}${likesText}`;
+            }).join('\n');
+
+            const prompt = '请分析以下社交媒体评论，生成结构化的分析报告。评论后面的 [👍 数字] 表示该评论的点赞数，点赞数高的评论代表更多用户的共鸣，请特别关注这些热门评论：\n\n' +
                 commentsText +
                 '\n\n请按照以下格式输出：\n\n' +
-                '## 关键洞察\n[总结3-5个主要洞察点]\n\n' +
+                '## 关键洞察\n[总结3-5个主要洞察点，特别关注高点赞评论反映的用户关注点]\n\n' +
                 '## 情感分析\n- 正面情感: X%\n- 中性情感: X%\n- 负面情感: X%\n\n' +
-                '## 主要主题\n1. [主题1]: [描述]\n2. [主题2]: [描述]\n3. [主题3]: [描述]\n\n' +
+                '## 主要主题\n1. [主题1]: [描述，标注是否为热门话题]\n2. [主题2]: [描述，标注是否为热门话题]\n3. [主题3]: [描述，标注是否为热门话题]\n\n' +
+                '## 热门评论分析\n[分析点赞数最高的评论，揭示用户最关心的内容]\n\n' +
                 '## 显著趋势\n[描述观察到的趋势和模式]\n\n' +
-                '## 建议\n[基于分析提供的建议]';
+                '## 建议\n[基于分析提供的建议，特别考虑高点赞评论的反馈]';
 
             const data = await this.chatCompletion(aiConfig, [
                 { role: 'system', content: aiConfig.systemPrompt },
@@ -496,10 +583,10 @@ class CommentInsightBackground {
         const chunks = [];
         let buffer = [];
         let charCount = 0;
-        
+
         // 使用传入的动态字符限制
         const LIMIT = charLimit;
-        
+
         for (const c of comments) {
             const t = String(c.text || '');
             if (charCount + t.length > LIMIT && buffer.length > 0) {
@@ -518,11 +605,15 @@ class CommentInsightBackground {
         // 为每个批次动态分配token数量
         // 批次分析使用较少的token（约40%的maxTokens），为最终汇总预留更多空间
         const chunkMaxTokens = Math.floor(aiConfig.maxTokens * 0.4);
-        
+
         for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i];
-            const chunkText = chunk.map(c => `- ${c.text}`).join('\n');
-            const prompt = `以下是第 ${i + 1}/${chunks.length} 批评论（共 ${chunk.length} 条），请提炼要点，输出小结（要点、情感比例、主题与显著现象）：\n\n${chunkText}`;
+            const chunkText = chunk.map(c => {
+                const likes = c.likes || 0;
+                const likesText = likes > 0 ? ` [👍 ${likes}]` : '';
+                return `- ${c.text}${likesText}`;
+            }).join('\n');
+            const prompt = `以下是第 ${i + 1}/${chunks.length} 批评论（共 ${chunk.length} 条），评论后面的 [👍 数字] 表示点赞数，请特别关注高点赞评论。请提炼要点，输出小结（要点、情感比例、主题、热门评论与显著现象）：\n\n${chunkText}`;
             const data = await this.chatCompletion(aiConfig, [
                 { role: 'system', content: aiConfig.systemPrompt },
                 { role: 'user', content: prompt }
@@ -553,15 +644,18 @@ class CommentInsightBackground {
             '- 负面情感: X%',
             '',
             '## 主要主题',
-            '1. ...',
-            '2. ...',
-            '3. ...',
+            '1. [主题1]: [描述，标注是否为热门话题]',
+            '2. [主题2]: [描述，标注是否为热门话题]',
+            '3. [主题3]: [描述，标注是否为热门话题]',
+            '',
+            '## 热门评论分析',
+            '[分析点赞数最高的评论，揭示用户最关心的内容]',
             '',
             '## 显著趋势',
             '...',
             '',
             '## 建议',
-            '...'
+            '[基于分析提供的建议，特别考虑高点赞评论的反馈]'
         ].join('\n');
 
         const data = await this.chatCompletion(aiConfig, [
@@ -811,26 +905,26 @@ class CommentInsightBackground {
     convertToMarkdown(data) {
         let markdown = `# 评论分析报告\n\n`;
         markdown += `**生成时间**: ${new Date().toLocaleString('zh-CN')}\n`;
-        
+
         // 修复评论数量获取逻辑
         const commentCount = data.comments?.length || data.commentCount || 0;
         markdown += `**评论数量**: ${commentCount}\n`;
-        
+
         markdown += `**平台**: ${data.platform || '未知'}\n\n`;
 
         if (data.analysis) {
             markdown += `## AI分析结果\n\n`;
-            
+
             // 检查是否需要包含思考内容
             if (data.includeThinking && data.analysis.thinkingProcess) {
                 markdown += `<details>\n<summary>AI思考过程</summary>\n\n`;
                 markdown += `${this.escapeMarkdownText(data.analysis.thinkingProcess)}\n\n`;
                 markdown += `</details>\n\n`;
             }
-            
+
             // 处理分析内容，正确处理可能存在的<think>标签
             let analysisContent = data.analysis.rawAnalysis || '暂无分析结果';
-            
+
             if (data.includeThinking) {
                 // 如果用户选择包含思考过程，将<think>标签转换为<details>折叠块
                 analysisContent = analysisContent.replace(
@@ -841,7 +935,7 @@ class CommentInsightBackground {
                 // 如果用户选择不包含思考过程，则移除<think>标签及其内容
                 analysisContent = analysisContent.replace(/<think>.*?<\/think>/gs, '');
             }
-            
+
             markdown += analysisContent;
             markdown += `\n\n`;
         }

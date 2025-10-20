@@ -16,7 +16,10 @@ class CommentInsightOptions {
             await this.loadConfig();
             
             // 填充表单
-            this.populateForm();
+            await this.populateForm();
+            
+            // 设置模式切换
+            this.setupModeToggle();
             
             console.log('配置页面初始化完成');
         } catch (error) {
@@ -158,22 +161,19 @@ class CommentInsightOptions {
                     mode: 'dom',
                     delay: 1000
                 },
-                instagram: {
-                    token: '',
-                    appId: ''
-                },
-                facebook: {
-                    appId: '',
-                    appSecret: ''
-                },
                 twitter: {
+                    mode: 'dom',
                     bearerToken: '',
                     apiVersion: 'v2'
+                },
+                bilibili: {
+                    mode: 'dom'
                 },
                 // 公共配置
                 maxComments: 100,
                 export: {
                     includeComments: false,
+                    includeThinking: false,
                     commentsSort: 'timestamp-desc'
                 }
             }
@@ -226,17 +226,13 @@ class CommentInsightOptions {
             document.getElementById('tiktok-mode').value = this.config.platforms.tiktok.mode || 'dom';
             document.getElementById('tiktok-delay').value = this.config.platforms.tiktok.delay || 1000;
 
-            // Instagram
-            document.getElementById('instagram-token').value = this.config.platforms.instagram.token || '';
-            document.getElementById('instagram-app-id').value = this.config.platforms.instagram.appId || '';
-
-            // Facebook
-            document.getElementById('facebook-app-id').value = this.config.platforms.facebook.appId || '';
-            document.getElementById('facebook-app-secret').value = this.config.platforms.facebook.appSecret || '';
-
             // Twitter
+            document.getElementById('twitter-mode').value = this.config.platforms.twitter.mode || 'dom';
             document.getElementById('twitter-bearer-token').value = this.config.platforms.twitter.bearerToken || '';
             document.getElementById('twitter-api-version').value = this.config.platforms.twitter.apiVersion || 'v2';
+
+            // Bilibili
+            document.getElementById('bilibili-mode').value = this.config.platforms.bilibili?.mode || 'dom';
 
             // 导出配置
             const exportConfig = this.config.platforms.export || {};
@@ -280,17 +276,13 @@ class CommentInsightOptions {
                     mode: document.getElementById('tiktok-mode').value,
                     delay: parseInt(document.getElementById('tiktok-delay').value)
                 },
-                instagram: {
-                    token: document.getElementById('instagram-token').value.trim(),
-                    appId: document.getElementById('instagram-app-id').value.trim()
-                },
-                facebook: {
-                    appId: document.getElementById('facebook-app-id').value.trim(),
-                    appSecret: document.getElementById('facebook-app-secret').value.trim()
-                },
                 twitter: {
+                    mode: document.getElementById('twitter-mode').value,
                     bearerToken: document.getElementById('twitter-bearer-token').value.trim(),
                     apiVersion: document.getElementById('twitter-api-version').value
+                },
+                bilibili: {
+                    mode: document.getElementById('bilibili-mode').value
                 },
                 // 公共配置
                 maxComments: parseInt(document.getElementById('platform-max-comments').value),
@@ -678,11 +670,10 @@ class CommentInsightOptions {
         const requiredStructure = {
             ai: ['endpoint', 'model', 'temperature', 'maxTokens'],
             platforms: {
-                youtube: ['maxComments'],
+                youtube: [],
                 tiktok: ['mode', 'delay'],
-                instagram: [],
-                facebook: [],
-                twitter: ['apiVersion'],
+                twitter: ['mode', 'apiVersion'],
+                bilibili: ['mode'],
                 maxComments: [], // 公共配置
                 export: ['includeComments', 'commentsSort'] // 导出配置
             }
@@ -792,6 +783,49 @@ class CommentInsightOptions {
         }, 3000);
         
         console.log(`[${type.toUpperCase()}] ${message}`);
+    }
+
+    setupModeToggle() {
+        // Twitter模式切换
+        const twitterMode = document.getElementById('twitter-mode');
+        const twitterBearerToken = document.getElementById('twitter-bearer-token');
+        const twitterApiVersion = document.getElementById('twitter-api-version');
+        
+        if (!twitterMode) {
+            console.warn('Twitter模式选择器未找到');
+            return;
+        }
+        
+        const toggleTwitterFields = () => {
+            try {
+                const isApiMode = twitterMode.value === 'api';
+                
+                // 查找Bearer Token字段的父容器
+                if (twitterBearerToken) {
+                    const bearerTokenDiv = twitterBearerToken.closest('div');
+                    if (bearerTokenDiv) {
+                        bearerTokenDiv.style.display = isApiMode ? 'block' : 'none';
+                    }
+                }
+                
+                // 查找API Version字段的父容器
+                if (twitterApiVersion) {
+                    const apiVersionDiv = twitterApiVersion.closest('div');
+                    if (apiVersionDiv) {
+                        apiVersionDiv.style.display = isApiMode ? 'block' : 'none';
+                    }
+                }
+            } catch (error) {
+                console.error('切换Twitter字段显示失败:', error);
+            }
+        };
+        
+        twitterMode.addEventListener('change', toggleTwitterFields);
+        
+        // 初始化显示状态
+        setTimeout(() => {
+            toggleTwitterFields();
+        }, 100);
     }
 }
 

@@ -17,16 +17,14 @@
 
 ## 📝 项目简介
 
-评论洞察是一款基于Chrome Manifest V3的浏览器扩展，专为内容创作者、市场分析师和社交媒体管理者设计。它能够从YouTube、TikTok、Instagram、Facebook、Twitter/X和哔哩哔哩等六大主流平台智能提取评论，并通过AI技术生成深度洞察报告，帮助用户快速理解用户反馈、把握舆论趋势、优化内容策略。
+评论洞察是一款基于Chrome Manifest V3的浏览器扩展，专为内容创作者、市场分析师和社交媒体管理者设计。它能够从YouTube、TikTok、Twitter/X和哔哩哔哩等主流平台智能提取评论，并通过AI技术生成深度洞察报告，帮助用户快速理解用户反馈、把握舆论趋势、优化内容策略。
 
 ## ✨ 核心特性
 
 ### 🔍 **多平台评论提取**
 - **YouTube**: 官方API提取，高效稳定（支持Shorts视频）
 - **TikTok**: DOM解析，智能滚动加载
-- **Instagram**: API + DOM混合模式
-- **Facebook**: Graph API提取
-- **Twitter/X**: API v2提取
+- **Twitter/X**: 支持API v2和DOM两种提取模式
 - **哔哩哔哩**: 智能DOM穿透Shadow DOM
 
 ### 🤖 **AI智能分析**

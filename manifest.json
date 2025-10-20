@@ -13,8 +13,6 @@
   "host_permissions": [
     "https://*.youtube.com/*",
     "https://*.tiktok.com/*",
-    "https://*.instagram.com/*",
-    "https://*.facebook.com/*",
     "https://*.twitter.com/*",
     "https://*.x.com/*",
     "https://*.bilibili.com/*",
@@ -28,8 +26,6 @@
       "matches": [
         "https://*.youtube.com/*",
         "https://*.tiktok.com/*",
-        "https://*.instagram.com/*",
-        "https://*.facebook.com/*",
         "https://*.twitter.com/*",
         "https://*.x.com/*",
         "https://*.bilibili.com/*",

@@ -114,6 +114,22 @@ class CommentInsightPopup {
 
             if (response.success) {
                 this.currentPlatform = response.platform;
+                
+                // 对于支持的平台，尝试从content script获取更准确的标题
+                if (this.currentPlatform.supported) {
+                    try {
+                        const platformInfo = await this.sendMessageToTab({
+                            action: 'getPlatformInfo'
+                        });
+                        
+                        if (platformInfo.success && platformInfo.title) {
+                            this.currentTab.title = platformInfo.title;
+                        }
+                    } catch (e) {
+                        console.warn('获取平台信息失败:', e);
+                    }
+                }
+                
                 this.updatePlatformUI();
             }
         } catch (error) {
@@ -461,6 +477,23 @@ class CommentInsightPopup {
         return new Promise((resolve) => {
             chrome.runtime.sendMessage(message, (response) => {
                 resolve(response || { success: false, error: 'No response' });
+            });
+        });
+    }
+
+    async sendMessageToTab(message) {
+        return new Promise((resolve) => {
+            if (!this.currentTab || !this.currentTab.id) {
+                resolve({ success: false, error: 'No active tab' });
+                return;
+            }
+            
+            chrome.tabs.sendMessage(this.currentTab.id, message, (response) => {
+                if (chrome.runtime.lastError) {
+                    resolve({ success: false, error: chrome.runtime.lastError.message });
+                } else {
+                    resolve(response || { success: false, error: 'No response' });
+                }
             });
         });
     }

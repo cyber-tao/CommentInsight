@@ -5,32 +5,26 @@ class CommentExtractor {
         this.extractors = {
             youtube: new YouTubeExtractor(),
             tiktok: new TikTokExtractor(),
-            instagram: new InstagramExtractor(),
-            facebook: new FacebookExtractor(),
             twitter: new TwitterExtractor(),
             bilibili: new BilibiliExtractor()
         };
-        
+
         this.initializeContentScript();
     }
 
     detectCurrentPlatform() {
         const hostname = window.location.hostname;
-        
+
         if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
             return 'youtube';
         } else if (hostname.includes('tiktok.com')) {
             return 'tiktok';
-        } else if (hostname.includes('instagram.com')) {
-            return 'instagram';
-        } else if (hostname.includes('facebook.com') || hostname.includes('fb.com')) {
-            return 'facebook';
         } else if (hostname.includes('twitter.com') || hostname.includes('x.com')) {
             return 'twitter';
         } else if (hostname.includes('bilibili.com') || hostname.includes('b23.tv')) {
             return 'bilibili';
         }
-        
+
         return 'unknown';
     }
 
@@ -43,7 +37,7 @@ class CommentExtractor {
         });
 
         console.log(`评论洞察扩展已在${this.platform}平台加载`);
-        
+
         // 添加心跳检测，确保脚本正常运行
         setInterval(() => {
             console.log('内容脚本心跳:', this.platform, new Date().toISOString());
@@ -52,12 +46,12 @@ class CommentExtractor {
 
     async handleMessage(message, sender, sendResponse) {
         console.log('接收到消息:', message.action, '平台:', this.platform);
-        
+
         // 使用立即执行的异步函数来确保正确的异步处理
         (async () => {
             try {
                 let result;
-                
+
                 switch (message.action) {
                     case 'extractTikTokComments':
                         if (this.platform === 'tiktok') {
@@ -68,23 +62,7 @@ class CommentExtractor {
                         }
                         break;
 
-                    case 'extractInstagramComments':
-                        if (this.platform === 'instagram') {
-                            result = await this.extractors.instagram.extract(message.config);
-                            sendResponse({ success: true, comments: result });
-                        } else {
-                            sendResponse({ success: false, error: '当前页面不是Instagram' });
-                        }
-                        break;
 
-                    case 'extractFacebookComments':
-                        if (this.platform === 'facebook') {
-                            result = await this.extractors.facebook.extract(message.config);
-                            sendResponse({ success: true, comments: result });
-                        } else {
-                            sendResponse({ success: false, error: '当前页面不是Facebook' });
-                        }
-                        break;
 
                     case 'extractTwitterComments':
                         if (this.platform === 'twitter') {
@@ -105,9 +83,9 @@ class CommentExtractor {
                                 sendResponse({ success: true, comments: result });
                             } catch (extractError) {
                                 console.error('Bilibili评论提取错误:', extractError);
-                                sendResponse({ 
-                                    success: false, 
-                                    error: `Bilibili评论提取失败: ${extractError.message}` 
+                                sendResponse({
+                                    success: false,
+                                    error: `Bilibili评论提取失败: ${extractError.message}`
                                 });
                             }
                         } else {
@@ -117,11 +95,20 @@ class CommentExtractor {
                         break;
 
                     case 'getPlatformInfo':
+                        // 对于TikTok，从视频描述中获取标题
+                        let pageTitle = document.title;
+                        if (this.platform === 'tiktok') {
+                            const descElement = document.querySelector('[data-e2e="new-desc-span"]');
+                            if (descElement) {
+                                pageTitle = descElement.textContent.trim();
+                            }
+                        }
+
                         sendResponse({
                             success: true,
                             platform: this.platform,
                             url: window.location.href,
-                            title: document.title
+                            title: pageTitle
                         });
                         break;
 
@@ -178,8 +165,8 @@ class BaseExtractor {
 
         while (scrollCount < maxScrolls) {
             const container = scrollContainer || window;
-            const currentHeight = container === window ? 
-                document.documentElement.scrollHeight : 
+            const currentHeight = container === window ?
+                document.documentElement.scrollHeight :
                 container.scrollHeight;
 
             if (currentHeight === lastHeight) {
@@ -187,7 +174,7 @@ class BaseExtractor {
             }
 
             lastHeight = currentHeight;
-            
+
             if (container === window) {
                 window.scrollTo(0, document.documentElement.scrollHeight);
             } else {
@@ -210,16 +197,16 @@ class BaseExtractor {
     extractTimestamp(element) {
         // 尝试从各种可能的时间属性中提取时间戳
         const timeSelectors = ['time', '[datetime]', '[data-timestamp]', '.timestamp'];
-        
+
         for (const selector of timeSelectors) {
             const timeElement = element.querySelector(selector);
             if (timeElement) {
-                return timeElement.getAttribute('datetime') || 
-                       timeElement.getAttribute('data-timestamp') || 
-                       timeElement.textContent;
+                return timeElement.getAttribute('datetime') ||
+                    timeElement.getAttribute('data-timestamp') ||
+                    timeElement.textContent;
             }
         }
-        
+
         return new Date().toISOString(); // 默认使用当前时间
     }
 }
@@ -232,7 +219,7 @@ class YouTubeExtractor extends BaseExtractor {
 
             // 等待评论区域加载
             await this.waitForElement('#comments');
-            
+
             // 滚动加载更多评论
             const commentsContainer = document.querySelector('#comments');
             await this.scrollToLoadMore(commentsContainer);
@@ -319,254 +306,259 @@ class TikTokExtractor extends BaseExtractor {
         try {
             console.log('开始提取TikTok评论');
 
-            // 等待评论区域加载
-            await this.waitForElement('[data-e2e="comment-list"]', 10000);
-            
-            // 滚动加载更多评论
-            const commentsContainer = document.querySelector('[data-e2e="comment-list"]');
-            if (commentsContainer) {
-                await this.scrollToLoadMore(commentsContainer);
-            }
+            // 等待页面加载
+            await this.delay(3000);
 
-            // TikTok的评论选择器可能会变化，尝试多个可能的选择器
-            const commentSelectors = [
-                '[data-e2e="comment-item"]',
-                '.comment-item',
-                '[class*="comment"]'
-            ];
-
-            let commentElements = [];
-            for (const selector of commentSelectors) {
-                commentElements = document.querySelectorAll(selector);
-                if (commentElements.length > 0) break;
-            }
+            // 获取目标评论数量
+            const maxComments = config.platforms?.maxComments || 100;
+            console.log(`目标提取评论数: ${maxComments}`);
 
             const comments = [];
-            for (const element of commentElements) {
-                try {
-                    const comment = this.extractSingleTikTokComment(element);
-                    if (comment) {
-                        comments.push(comment);
-                    }
-                } catch (error) {
-                    console.warn('提取单个TikTok评论失败:', error);
+            const seenTexts = new Set(); // 用于去重
+            let lastCommentCount = 0;
+            let noNewCommentsCount = 0;
+            const maxScrollAttempts = 50;
+            let scrollAttempts = 0;
+
+            // 持续滚动直到达到目标数量或没有新评论
+            while (comments.length < maxComments && scrollAttempts < maxScrollAttempts) {
+                // 滚动到页面底部
+                window.scrollTo(0, document.documentElement.scrollHeight);
+                await this.delay(2000);
+
+                // 展开所有"查看更多回复"按钮
+                await this.expandAllReplies();
+                await this.delay(1500);
+
+                // 查找所有主评论容器 - 使用多个选择器尝试
+                let commentContainers = document.querySelectorAll('[class*="DivCommentObjectWrapper"]');
+                if (commentContainers.length === 0) {
+                    commentContainers = document.querySelectorAll('[class*="DivCommentItemWrapper"]');
                 }
+                console.log(`找到 ${commentContainers.length} 个评论容器`);
+
+                for (const container of commentContainers) {
+                    if (comments.length >= maxComments) break;
+
+                    try {
+                        // 提取主评论
+                        const mainComment = this.extractCommentFromContainer(container, 1);
+                        if (mainComment && !seenTexts.has(mainComment.text)) {
+                            seenTexts.add(mainComment.text);
+                            comments.push(mainComment);
+                        }
+
+                        // 提取回复
+                        if (comments.length < maxComments) {
+                            const replyContainer = container.querySelector('[class*="DivReplyContainer"]');
+                            if (replyContainer) {
+                                const replyComments = replyContainer.querySelectorAll('[class*="DivCommentContentContainer"]');
+                                for (const replyComment of replyComments) {
+                                    if (comments.length >= maxComments) break;
+
+                                    const reply = this.extractCommentFromElement(replyComment, 2);
+                                    if (reply && !seenTexts.has(reply.text)) {
+                                        seenTexts.add(reply.text);
+                                        comments.push(reply);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.warn('提取单个评论失败:', error);
+                    }
+                }
+
+                console.log(`第${scrollAttempts + 1}次滚动，当前评论数: ${comments.length}`);
+
+                // 检查是否有新评论
+                if (comments.length === lastCommentCount) {
+                    noNewCommentsCount++;
+                    if (noNewCommentsCount >= 3) {
+                        console.log('连续3次没有新评论，停止滚动');
+                        break;
+                    }
+                } else {
+                    noNewCommentsCount = 0;
+                    lastCommentCount = comments.length;
+                }
+
+                scrollAttempts++;
             }
 
-            console.log(`成功提取${comments.length}条TikTok评论`);
-            return comments;
+            console.log(`成功提取${comments.length}条TikTok评论（包含回复）`);
+
+            if (comments.length === 0) {
+                throw new Error('未能提取到任何有效评论内容');
+            }
+
+            return comments.slice(0, maxComments);
 
         } catch (error) {
             throw new Error(`TikTok评论提取失败: ${error.message}`);
         }
     }
 
-    extractSingleTikTokComment(element) {
-        // TikTok的DOM结构经常变化，使用多种策略提取
-        const authorSelectors = ['[data-e2e="comment-username"]', '.username', '[class*="username"]'];
-        const contentSelectors = ['[data-e2e="comment-text"]', '.comment-text', '[class*="comment-text"]'];
-        const timeSelectors = ['[data-e2e="comment-time"]', '.time', '[class*="time"]'];
+    async expandAllReplies() {
+        try {
+            // 查找所有"查看回复"按钮 - 使用多个选择器
+            const selectors = [
+                '[class*="DivViewRepliesContainer"]',
+                '[class*="DivViewMoreRepliesWrapper"]',
+                '[data-e2e^="view-more-"]',
+                '[class*="DivReplyActionContainer"] span[role="button"]'
+            ];
 
-        let author = '匿名';
-        let text = '';
-        let timestamp = new Date().toISOString();
-
-        // 提取作者
-        for (const selector of authorSelectors) {
-            const authorElement = element.querySelector(selector);
-            if (authorElement) {
-                author = this.sanitizeText(authorElement.textContent);
-                break;
+            let allButtons = [];
+            for (const selector of selectors) {
+                const buttons = document.querySelectorAll(selector);
+                allButtons.push(...buttons);
             }
-        }
 
-        // 提取内容
-        for (const selector of contentSelectors) {
-            const contentElement = element.querySelector(selector);
-            if (contentElement) {
-                text = this.sanitizeText(contentElement.textContent);
-                break;
+            console.log(`找到 ${allButtons.length} 个可能的展开按钮`);
+
+            let expandedCount = 0;
+            for (const button of allButtons) {
+                try {
+                    const buttonText = button.textContent;
+                    // 检查是否是"查看"按钮
+                    if ((buttonText.includes('查看') || buttonText.includes('View') || buttonText.includes('replies')) &&
+                        !buttonText.includes('隐藏') && !buttonText.includes('Hide')) {
+                        button.click();
+                        expandedCount++;
+                        console.log(`点击了展开按钮: ${buttonText.substring(0, 20)}`);
+                        // 每展开3个就等待一下
+                        if (expandedCount % 3 === 0) {
+                            await this.delay(800);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('点击展开按钮失败:', e);
+                }
             }
-        }
 
-        // 提取时间
-        for (const selector of timeSelectors) {
-            const timeElement = element.querySelector(selector);
-            if (timeElement) {
-                timestamp = timeElement.textContent || timeElement.getAttribute('datetime');
-                break;
+            if (expandedCount > 0) {
+                console.log(`成功展开了 ${expandedCount} 个回复`);
             }
+        } catch (error) {
+            console.warn('展开回复过程出错:', error);
         }
+    }
 
-        if (!text) return null;
+    extractCommentFromContainer(container, level) {
+        // 直接从容器中提取，不需要查找子容器
+        return this.extractCommentFromElement(container, level);
+    }
 
-        return {
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-            author,
-            text,
-            timestamp,
-            likes: 0, // TikTok不总是显示点赞数
-            replies: 0
-        };
+    extractCommentFromElement(element, level) {
+        try {
+            // 提取用户名 - 尝试多个选择器
+            let author = '匿名';
+            const usernameSelectors = [
+                `[data-e2e="comment-username-${level}"] p`,
+                `[data-e2e="comment-username-${level}"]`,
+                '[class*="DivUsernameContentWrapper"] p',
+                '[class*="StyledTUXText"]'
+            ];
+
+            for (const selector of usernameSelectors) {
+                const usernameElement = element.querySelector(selector);
+                if (usernameElement && usernameElement.textContent.trim()) {
+                    author = this.sanitizeText(usernameElement.textContent);
+                    break;
+                }
+            }
+
+            // 提取评论内容 - 尝试多个选择器
+            let text = '';
+            const contentSelectors = [
+                `[data-e2e="comment-level-${level}"] span`,
+                `[data-e2e="comment-level-${level}"]`,
+                `span[data-e2e="comment-level-${level}"]`
+            ];
+
+            for (const selector of contentSelectors) {
+                const contentElement = element.querySelector(selector);
+                if (contentElement && contentElement.textContent.trim()) {
+                    text = this.sanitizeText(contentElement.textContent);
+                    break;
+                }
+            }
+
+            if (!text || text.length < 1) {
+                console.warn(`未找到评论文本，level: ${level}`);
+                return null;
+            }
+
+            // 提取时间 - 尝试多个选择器
+            let timestamp = new Date().toISOString();
+            const timeSelectors = [
+                '[class*="DivCommentSubContentWrapper"] span:first-child',
+                '[class*="DivCommentSubContentWrapper"] .TUXText:first-child',
+                `[data-e2e="comment-time-${level}"]`
+            ];
+
+            for (const selector of timeSelectors) {
+                const timeElement = element.querySelector(selector);
+                if (timeElement && timeElement.textContent.trim()) {
+                    const timeText = this.sanitizeText(timeElement.textContent);
+                    // 检查是否是时间格式（包含数字和-）
+                    if (/\d/.test(timeText) && timeText.length < 20) {
+                        timestamp = timeText;
+                        break;
+                    }
+                }
+            }
+
+            // 如果时间格式是 "月-日"（如 "9-15"），补充当前年份
+            if (timestamp && /^\d{1,2}-\d{1,2}$/.test(timestamp)) {
+                const currentYear = new Date().getFullYear();
+                timestamp = `${currentYear}-${timestamp}`;
+            }
+
+            // 提取点赞数 - 尝试多个选择器
+            let likes = 0;
+            const likeSelectors = [
+                '[class*="DivLikeContainer"] span.TUXText',
+                '[class*="DivLikeContainer"] span:last-child',
+                '[data-e2e="comment-like-count"]'
+            ];
+
+            for (const selector of likeSelectors) {
+                const likeElement = element.querySelector(selector);
+                if (likeElement) {
+                    const likeText = this.sanitizeText(likeElement.textContent);
+                    // 处理 "12.6K" 这样的格式
+                    if (likeText.includes('K')) {
+                        likes = Math.round(parseFloat(likeText.replace('K', '')) * 1000);
+                    } else if (likeText.includes('M')) {
+                        likes = Math.round(parseFloat(likeText.replace('M', '')) * 1000000);
+                    } else {
+                        likes = parseInt(likeText) || 0;
+                    }
+                    if (likes > 0) break;
+                }
+            }
+
+            console.log(`提取到评论: ${author} - ${text.substring(0, 30)}... (${likes} 赞)`);
+
+            return {
+                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                author,
+                text,
+                timestamp,
+                likes,
+                replies: 0,
+                level
+            };
+        } catch (error) {
+            console.warn('提取评论数据失败:', error);
+            return null;
+        }
     }
 }
 
 // Instagram评论提取器
-class InstagramExtractor extends BaseExtractor {
-    async extract(config) {
-        try {
-            console.log('开始提取Instagram评论');
-
-            // Instagram的评论通常在帖子详情页面
-            await this.waitForElement('article', 10000);
-            
-            // 尝试点击"查看所有评论"按钮
-            const viewAllButton = document.querySelector('button[class*="comment"]');
-            if (viewAllButton && viewAllButton.textContent.includes('查看')) {
-                viewAllButton.click();
-                await this.delay(2000);
-            }
-
-            // 滚动加载更多评论
-            await this.scrollToLoadMore(window);
-
-            // Instagram评论选择器
-            const commentSelectors = [
-                'article ul > div > li',
-                '[class*="comment"]',
-                'article div[role="button"]'
-            ];
-
-            let commentElements = [];
-            for (const selector of commentSelectors) {
-                commentElements = document.querySelectorAll(selector);
-                if (commentElements.length > 0) break;
-            }
-
-            const comments = [];
-            for (const element of commentElements) {
-                try {
-                    const comment = this.extractSingleInstagramComment(element);
-                    if (comment) {
-                        comments.push(comment);
-                    }
-                } catch (error) {
-                    console.warn('提取单个Instagram评论失败:', error);
-                }
-            }
-
-            console.log(`成功提取${comments.length}条Instagram评论`);
-            return comments;
-
-        } catch (error) {
-            throw new Error(`Instagram评论提取失败: ${error.message}`);
-        }
-    }
-
-    extractSingleInstagramComment(element) {
-        // Instagram的评论结构相对稳定
-        const authorElement = element.querySelector('a[role="link"]');
-        const contentSpans = element.querySelectorAll('span');
-        
-        let author = '匿名';
-        let text = '';
-
-        if (authorElement) {
-            author = this.sanitizeText(authorElement.textContent);
-        }
-
-        // Instagram评论文本通常在span元素中
-        for (const span of contentSpans) {
-            const spanText = this.sanitizeText(span.textContent);
-            if (spanText && spanText !== author && spanText.length > 3) {
-                text = spanText;
-                break;
-            }
-        }
-
-        if (!text || text === author) return null;
-
-        return {
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-            author,
-            text,
-            timestamp: new Date().toISOString(),
-            likes: 0,
-            replies: 0
-        };
-    }
-}
-
-// Facebook评论提取器
-class FacebookExtractor extends BaseExtractor {
-    async extract(config) {
-        try {
-            console.log('开始提取Facebook评论');
-
-            // Facebook的DOM结构比较复杂，需要等待动态加载
-            await this.delay(3000);
-
-            // 尝试多种Facebook评论选择器
-            const commentSelectors = [
-                '[data-testid="UFI2Comment/root"]',
-                '[aria-label*="comment"]',
-                '[class*="comment"]'
-            ];
-
-            let commentElements = [];
-            for (const selector of commentSelectors) {
-                commentElements = document.querySelectorAll(selector);
-                if (commentElements.length > 0) break;
-            }
-
-            // 滚动加载更多评论
-            await this.scrollToLoadMore(window);
-
-            const comments = [];
-            for (const element of commentElements) {
-                try {
-                    const comment = this.extractSingleFacebookComment(element);
-                    if (comment) {
-                        comments.push(comment);
-                    }
-                } catch (error) {
-                    console.warn('提取单个Facebook评论失败:', error);
-                }
-            }
-
-            console.log(`成功提取${comments.length}条Facebook评论`);
-            return comments;
-
-        } catch (error) {
-            throw new Error(`Facebook评论提取失败: ${error.message}`);
-        }
-    }
-
-    extractSingleFacebookComment(element) {
-        // Facebook的评论结构经常变化，使用灵活的提取策略
-        const textContent = this.sanitizeText(element.textContent);
-        
-        if (!textContent || textContent.length < 3) return null;
-
-        // 尝试提取作者名
-        const authorElement = element.querySelector('a[role="link"]') || 
-                             element.querySelector('strong') ||
-                             element.querySelector('[class*="author"]');
-        
-        const author = authorElement ? this.sanitizeText(authorElement.textContent) : '匿名';
-
-        return {
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-            author,
-            text: textContent,
-            timestamp: new Date().toISOString(),
-            likes: 0,
-            replies: 0
-        };
-    }
-}
-
-// Twitter/X评论提取器
 class TwitterExtractor extends BaseExtractor {
     async extract(config) {
         try {
@@ -574,27 +566,69 @@ class TwitterExtractor extends BaseExtractor {
 
             // 等待推文和回复加载
             await this.waitForElement('[data-testid="tweet"]', 10000);
-            
-            // 滚动加载更多回复
-            await this.scrollToLoadMore(window);
+            await this.delay(2000);
 
-            // Twitter的回复/评论选择器
-            const tweetElements = document.querySelectorAll('[data-testid="tweet"]');
+            // 获取目标评论数量
+            const maxComments = config.platforms?.maxComments || 100;
+            console.log(`目标提取评论数: ${maxComments}`);
+
             const comments = [];
+            const seenIds = new Set(); // 用于去重
+            let lastCommentCount = 0;
+            let noNewCommentsCount = 0;
+            const maxScrollAttempts = 50;
+            let scrollAttempts = 0;
 
-            for (const element of tweetElements) {
-                try {
-                    const comment = this.extractSingleTwitterComment(element);
-                    if (comment) {
-                        comments.push(comment);
+            // 持续滚动直到达到目标数量或没有新评论
+            while (comments.length < maxComments && scrollAttempts < maxScrollAttempts) {
+                // 滚动到页面底部
+                window.scrollTo(0, document.documentElement.scrollHeight);
+
+                // 等待新评论加载
+                await this.delay(2000);
+
+                // 查找所有推文元素
+                const tweetElements = document.querySelectorAll('[data-testid="tweet"]');
+
+                // 提取新评论
+                for (const element of tweetElements) {
+                    if (comments.length >= maxComments) break;
+
+                    try {
+                        const comment = this.extractSingleTwitterComment(element);
+                        if (comment && !seenIds.has(comment.id)) {
+                            seenIds.add(comment.id);
+                            comments.push(comment);
+                        }
+                    } catch (error) {
+                        console.warn('提取单个Twitter评论失败:', error);
                     }
-                } catch (error) {
-                    console.warn('提取单个Twitter评论失败:', error);
                 }
+
+                console.log(`第${scrollAttempts + 1}次滚动，当前评论数: ${comments.length}`);
+
+                // 检查是否有新评论
+                if (comments.length === lastCommentCount) {
+                    noNewCommentsCount++;
+                    if (noNewCommentsCount >= 3) {
+                        console.log('连续3次没有新评论，停止滚动');
+                        break;
+                    }
+                } else {
+                    noNewCommentsCount = 0;
+                    lastCommentCount = comments.length;
+                }
+
+                scrollAttempts++;
             }
 
             console.log(`成功提取${comments.length}条Twitter评论`);
-            return comments;
+
+            if (comments.length === 0) {
+                throw new Error('未能提取到任何有效评论内容');
+            }
+
+            return comments.slice(0, maxComments);
 
         } catch (error) {
             throw new Error(`Twitter评论提取失败: ${error.message}`);
@@ -603,26 +637,119 @@ class TwitterExtractor extends BaseExtractor {
 
     extractSingleTwitterComment(element) {
         // Twitter的评论就是回复推文
-        const authorElement = element.querySelector('[data-testid="User-Names"] span');
+
+        // 提取用户名 - 尝试多个选择器
+        let author = '匿名';
+        const authorSelectors = [
+            '[data-testid="User-Name"] [dir="ltr"] span',
+            '[data-testid="User-Name"] span[class*="css"]',
+            'a[role="link"][href*="/"] span',
+            '[data-testid="User-Names"] a span'
+        ];
+
+        for (const selector of authorSelectors) {
+            const authorElement = element.querySelector(selector);
+            if (authorElement) {
+                const authorText = this.sanitizeText(authorElement.textContent);
+                // 过滤掉时间戳和其他非用户名文本
+                if (authorText && !authorText.match(/^\d+[smhd]$/) && authorText.length > 0 && authorText.length < 50) {
+                    author = authorText.startsWith('@') ? authorText : `@${authorText}`;
+                    break;
+                }
+            }
+        }
+
+        // 如果还是没找到，尝试从链接中提取
+        if (author === '匿名') {
+            const userLink = element.querySelector('a[href^="/"][href*="/status/"]');
+            if (userLink) {
+                const href = userLink.getAttribute('href');
+                const match = href.match(/^\/([^\/]+)\//);
+                if (match) {
+                    author = `@${match[1]}`;
+                }
+            }
+        }
+
+        // 提取评论内容
         const contentElement = element.querySelector('[data-testid="tweetText"]');
-        const timeElement = element.querySelector('time');
-        
         if (!contentElement) return null;
 
-        const author = authorElement ? this.sanitizeText(authorElement.textContent) : '匿名';
         const text = this.sanitizeText(contentElement.textContent);
-        const timestamp = timeElement ? timeElement.getAttribute('datetime') : new Date().toISOString();
-
         if (!text) return null;
 
+        // 提取时间
+        const timeElement = element.querySelector('time');
+        const timestamp = timeElement ? timeElement.getAttribute('datetime') : new Date().toISOString();
+
+        // 提取点赞数
+        let likes = 0;
+        const likeButton = element.querySelector('[data-testid="like"]');
+        if (likeButton) {
+            // 点赞数通常在按钮的aria-label或附近的文本中
+            const ariaLabel = likeButton.getAttribute('aria-label');
+            if (ariaLabel) {
+                const likeMatch = ariaLabel.match(/(\d+)/);
+                if (likeMatch) {
+                    likes = parseInt(likeMatch[1]);
+                }
+            }
+
+            // 如果aria-label没有，尝试查找附近的数字文本
+            if (likes === 0) {
+                const likeText = likeButton.textContent;
+                const likeMatch = likeText.match(/(\d+)/);
+                if (likeMatch) {
+                    likes = parseInt(likeMatch[1]);
+                }
+            }
+        }
+
+        // 提取回复数
+        let replies = 0;
+        const replyButton = element.querySelector('[data-testid="reply"]');
+        if (replyButton) {
+            const ariaLabel = replyButton.getAttribute('aria-label');
+            if (ariaLabel) {
+                const replyMatch = ariaLabel.match(/(\d+)/);
+                if (replyMatch) {
+                    replies = parseInt(replyMatch[1]);
+                }
+            }
+
+            if (replies === 0) {
+                const replyText = replyButton.textContent;
+                const replyMatch = replyText.match(/(\d+)/);
+                if (replyMatch) {
+                    replies = parseInt(replyMatch[1]);
+                }
+            }
+        }
+
+        // 生成稳定的ID用于去重
+        // 使用作者名+时间戳+文本前50字符的组合生成唯一ID
+        const idString = `${author}-${timestamp}-${text.substring(0, 50)}`;
+        const id = this.generateStableId(idString);
+
         return {
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+            id,
             author,
             text,
             timestamp,
-            likes: 0, // Twitter的点赞数需要额外解析
-            replies: 0
+            likes,
+            replies
         };
+    }
+
+    generateStableId(str) {
+        // 简单的哈希函数生成稳定ID
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32bit integer
+        }
+        return Math.abs(hash).toString(36);
     }
 }
 
@@ -640,16 +767,16 @@ class BilibiliExtractor extends BaseExtractor {
 
             // 等待Shadow DOM加载完成
             await this.delay(3000);
-            
+
             // 尝试滚动加载更多评论
             await this.scrollToLoadMoreShadow(config?.maxScrolls || 10);
-            
+
             // 等待加载完成
             await this.delay(2000);
 
             // 提取评论
             const comments = await this.extractShadowComments();
-            
+
             console.log(`成功提取Bilibili评论: ${comments.length}条`);
             return comments;
 
@@ -683,22 +810,22 @@ class BilibiliExtractor extends BaseExtractor {
 
         return null;
     }
-    
+
     // 支持Shadow DOM的滚动加载
     async scrollToLoadMoreShadow(maxScrolls = 10) {
         console.log('开始滚动加载更多评论...');
-        
+
         for (let i = 0; i < maxScrolls; i++) {
             // 滚动到页面底部
             window.scrollTo(0, document.documentElement.scrollHeight);
-            
+
             // 等待加载
             await this.delay(1500);
-            
+
             // 检查是否有新评论加载
             const currentCommentCount = this.getCurrentShadowCommentCount();
-            console.log(`第${i+1}次滚动，当前评论数: ${currentCommentCount}`);
-            
+            console.log(`第${i + 1}次滚动，当前评论数: ${currentCommentCount}`);
+
             // 如果连续几次没有新评论，停止滚动
             if (i > 2 && currentCommentCount === 0) {
                 console.log('连续多次没有找到评论，停止滚动');
@@ -706,16 +833,16 @@ class BilibiliExtractor extends BaseExtractor {
             }
         }
     }
-    
+
     // 获取当前可见的Shadow DOM评论数量
     getCurrentShadowCommentCount() {
         try {
             const commentApp = document.querySelector('#commentapp');
             if (!commentApp) return 0;
-            
+
             const biliComments = commentApp.querySelector('bili-comments');
             if (!biliComments || !biliComments.shadowRoot) return 0;
-            
+
             const commentThreads = biliComments.shadowRoot.querySelectorAll('bili-comment-thread-renderer');
             return commentThreads.length;
         } catch (e) {
@@ -727,7 +854,7 @@ class BilibiliExtractor extends BaseExtractor {
     async extractShadowComments() {
         const comments = [];
         console.log('开始从 Shadow DOM 提取评论（使用精确结构）...');
-        
+
         try {
             // 1. 找到主评论应用容器
             const commentApp = document.querySelector('#commentapp');
@@ -735,23 +862,23 @@ class BilibiliExtractor extends BaseExtractor {
                 console.log('未找到 #commentapp 容器');
                 return await this.fallbackExtractComments();
             }
-            
+
             // 2. 找到 bili-comments 组件
             const biliComments = commentApp.querySelector('bili-comments');
             if (!biliComments) {
                 console.log('未找到 bili-comments 组件');
                 return await this.fallbackExtractComments();
             }
-            
+
             // 3. 检查 bili-comments 的 shadowRoot
             const biliCommentsRoot = biliComments.shadowRoot;
             if (!biliCommentsRoot) {
                 console.log('bili-comments 没有 shadowRoot');
                 return await this.fallbackExtractComments();
             }
-            
+
             console.log('找到 bili-comments shadowRoot');
-            
+
             // 4. 在第一层 shadowRoot 中查找 #feed 容器
             const feedContainer = biliCommentsRoot.querySelector('#feed');
             if (!feedContainer) {
@@ -763,77 +890,77 @@ class BilibiliExtractor extends BaseExtractor {
                     return await this.fallbackExtractComments();
                 }
             }
-            
+
             // 5. 查找所有评论线程（bili-comment-thread-renderer）
             const commentThreads = biliCommentsRoot.querySelectorAll('bili-comment-thread-renderer');
             console.log(`找到 ${commentThreads.length} 个评论线程`);
-            
+
             if (commentThreads.length === 0) {
                 console.log('未找到评论线程，尝试替代方法');
                 return await this.fallbackExtractComments();
             }
-            
+
             // 6. 遍历每个评论线程
             for (let i = 0; i < commentThreads.length; i++) {
                 try {
                     const thread = commentThreads[i];
-                    
+
                     // 7. 检查线程的 shadowRoot
                     const threadRoot = thread.shadowRoot;
                     if (!threadRoot) {
                         console.log(`线程 ${i} 没有 shadowRoot`);
                         continue;
                     }
-                    
+
                     // 8. 在线程的 shadowRoot 中查找 #comment 元素
                     const commentElement = threadRoot.querySelector('#comment');
                     if (!commentElement) {
                         console.log(`线程 ${i} 没有 #comment 元素`);
                         continue;
                     }
-                    
+
                     // 9. 检查 #comment 的 shadowRoot
                     const commentRoot = commentElement.shadowRoot;
                     if (!commentRoot) {
                         console.log(`线程 ${i} 的 #comment 没有 shadowRoot`);
                         continue;
                     }
-                    
+
                     // 10. 在 #comment 的 shadowRoot 中查找 #main 元素
                     const mainElement = commentRoot.querySelector('#main');
                     if (!mainElement) {
                         console.log(`线程 ${i} 没有 #main 元素`);
                         continue;
                     }
-                    
+
                     // 11. 提取单个评论内容
                     const comment = this.extractFromMainElement(mainElement, i);
                     if (comment) {
                         comments.push(comment);
-                        console.log(`成功提取第${i+1}条评论: ${comment.author} - ${comment.text.substring(0, 30)}...`);
+                        console.log(`成功提取第${i + 1}条评论: ${comment.author} - ${comment.text.substring(0, 30)}...`);
                     }
                 } catch (error) {
-                    console.warn(`提取第${i+1}条评论失败:`, error.message);
+                    console.warn(`提取第${i + 1}条评论失败:`, error.message);
                 }
             }
-            
+
         } catch (error) {
             console.error('Shadow DOM 评论提取失败:', error);
             return await this.fallbackExtractComments();
         }
-        
+
         console.log(`Shadow DOM 提取完成，共 ${comments.length} 条评论`);
         return comments;
     }
-    
+
     // 从 #main 元素中提取评论内容（基于用户提供的精确DOM结构）
     extractFromMainElement(mainElement, index) {
         try {
-            console.log(`开始从 #main 元素提取第${index+1}条评论...`);
-            
+            console.log(`开始从 #main 元素提取第${index + 1}条评论...`);
+
             // 1. 提取用户名
             let author = '匿名用户';
-            
+
             // 查找 bili-comment-user-info 组件
             const userInfoElement = mainElement.querySelector('bili-comment-user-info');
             if (userInfoElement && userInfoElement.shadowRoot) {
@@ -843,10 +970,10 @@ class BilibiliExtractor extends BaseExtractor {
                     console.log(`找到用户名: ${author}`);
                 }
             }
-            
+
             // 2. 提取评论内容
             let content = '';
-            
+
             // 查找 bili-rich-text 组件
             const richTextElement = mainElement.querySelector('bili-rich-text');
             if (richTextElement && richTextElement.shadowRoot) {
@@ -864,10 +991,10 @@ class BilibiliExtractor extends BaseExtractor {
                     console.log(`找到评论内容: ${content.substring(0, 50)}...`);
                 }
             }
-            
+
             // 3. 提取时间
             let timeText = '';
-            
+
             // 查找 bili-comment-action-buttons-renderer 组件
             const actionButtonsElement = mainElement.querySelector('bili-comment-action-buttons-renderer');
             if (actionButtonsElement && actionButtonsElement.shadowRoot) {
@@ -877,10 +1004,10 @@ class BilibiliExtractor extends BaseExtractor {
                     console.log(`找到时间: ${timeText}`);
                 }
             }
-            
+
             // 4. 提取点赞数
             let likesText = '';
-            
+
             if (actionButtonsElement && actionButtonsElement.shadowRoot) {
                 const likeCountElement = actionButtonsElement.shadowRoot.querySelector('#like #count');
                 if (likeCountElement) {
@@ -888,13 +1015,13 @@ class BilibiliExtractor extends BaseExtractor {
                     console.log(`找到点赞数: ${likesText}`);
                 }
             }
-            
+
             // 5. 验证评论内容
             if (!content || content.length < 2) {
-                console.log(`评论 ${index+1} 内容为空或过短: "${content}"`);
+                console.log(`评论 ${index + 1} 内容为空或过短: "${content}"`);
                 return null;
             }
-            
+
             // 6. 过滤明显不是评论的内容
             const excludePatterns = [
                 /^点击.*/, /^查看.*/, /^加载.*/, /^更多.*/, /^展开.*/,
@@ -902,19 +1029,19 @@ class BilibiliExtractor extends BaseExtractor {
                 /^\d+秒$/, /^\d+分钟$/, /^\d+小时$/,
                 /^关注$/, /^取消关注$/, /^点赞$/, /^取消点赞$/
             ];
-            
+
             for (const pattern of excludePatterns) {
                 if (pattern.test(content.trim())) {
                     console.log(`过滤非评论内容: ${content.trim()}`);
                     return null;
                 }
             }
-            
+
             // 7. 处理数据
             const timestamp = this.parseTime(timeText);
             const likes = this.parseNumber(likesText);
             const id = this.generateCommentId(author, content, timestamp);
-            
+
             const comment = {
                 id,
                 author: this.sanitizeText(author),
@@ -925,21 +1052,21 @@ class BilibiliExtractor extends BaseExtractor {
                 platform: 'bilibili',
                 url: window.location.href
             };
-            
+
             console.log(`成功提取Shadow DOM评论: ${comment.author} - ${comment.text.substring(0, 30)}...`);
             return comment;
-            
+
         } catch (error) {
             console.error(`从 #main 元素提取评论失败:`, error);
             return null;
         }
     }
-    
+
     // 回退方法：当Shadow DOM失败时使用传统方法
     async fallbackExtractComments() {
         console.log('尝试传统方法提取评论...');
         const comments = [];
-        
+
         // 尝试多个可能的评论项选择器
         const commentSelectors = [
             '.reply-item',               // Bilibili新版单条评论
@@ -959,7 +1086,7 @@ class BilibiliExtractor extends BaseExtractor {
 
         let commentElements = [];
         let usedSelector = null;
-        
+
         for (const selector of commentSelectors) {
             try {
                 commentElements = document.querySelectorAll(selector);
@@ -980,7 +1107,7 @@ class BilibiliExtractor extends BaseExtractor {
         }
 
         console.log(`传统方法开始提取 ${commentElements.length} 个评论元素`);
-        
+
         // 提取每条评论
         for (let i = 0; i < Math.min(commentElements.length, 50); i++) {
             try {
@@ -990,7 +1117,7 @@ class BilibiliExtractor extends BaseExtractor {
                     comments.push(comment);
                 }
             } catch (error) {
-                console.warn(`传统方法提取第${i+1}条评论失败:`, error.message);
+                console.warn(`传统方法提取第${i + 1}条评论失败:`, error.message);
             }
         }
 
@@ -1068,15 +1195,15 @@ class BilibiliExtractor extends BaseExtractor {
         };
 
         // 提取各个字段
-        const author = this.findTextBySelectors(element, extractors.author) || 
-                      this.extractAuthorFallback(element) || '匿名用户';
-        
+        const author = this.findTextBySelectors(element, extractors.author) ||
+            this.extractAuthorFallback(element) || '匿名用户';
+
         const text = this.findTextBySelectors(element, extractors.content) ||
-                    this.extractContentFallback(element);
-        
+            this.extractContentFallback(element);
+
         const timeText = this.findTextBySelectors(element, extractors.time) ||
-                        this.extractTimeFallback(element);
-        
+            this.extractTimeFallback(element);
+
         const likesText = this.findTextBySelectors(element, extractors.likes);
 
         // 验证评论内容
@@ -1092,7 +1219,7 @@ class BilibiliExtractor extends BaseExtractor {
             /^d+秒$/, /^d+分钟$/, /^d+小时$/,
             /^关注$/, /^取消关注$/, /^点赞$/, /^取消点赞$/
         ];
-        
+
         for (const pattern of excludePatterns) {
             if (pattern.test(text.trim())) {
                 console.log(`过滤非评论内容: ${text.trim()}`);
@@ -1102,7 +1229,7 @@ class BilibiliExtractor extends BaseExtractor {
 
         // 处理时间格式
         const timestamp = this.parseTime(timeText);
-        
+
         // 处理点赞数
         const likes = this.parseNumber(likesText);
 
@@ -1119,7 +1246,7 @@ class BilibiliExtractor extends BaseExtractor {
             platform: 'bilibili',
             url: window.location.href
         };
-        
+
         console.log(`提取评论: ${comment.author}: ${comment.text.substring(0, 30)}...`);
         return comment;
     }
@@ -1194,20 +1321,20 @@ class BilibiliExtractor extends BaseExtractor {
     // 解析数字（点赞数等）
     parseNumber(text) {
         if (!text) return 0;
-        
+
         // 移除非数字字符
         const cleaned = text.replace(/[^\d\.]/g, '');
         const number = parseFloat(cleaned);
-        
+
         if (isNaN(number)) return 0;
-        
+
         // 处理中文单位
         if (text.includes('万')) {
             return Math.floor(number * 10000);
         } else if (text.includes('千')) {
             return Math.floor(number * 1000);
         }
-        
+
         return Math.floor(number);
     }
 
@@ -1223,7 +1350,7 @@ class BilibiliExtractor extends BaseExtractor {
         }
         return Math.abs(hash).toString(36);
     }
-    
+
     // 提取作者名的回退方法
     extractAuthorFallback(element) {
         // 尝试通过文本内容和结构特征找到作者名
@@ -1231,22 +1358,22 @@ class BilibiliExtractor extends BaseExtractor {
         for (const el of possibleAuthors) {
             const text = el.textContent.trim();
             const href = el.getAttribute('href');
-            
+
             // 如果是用户空间链接
             if (href && href.includes('/space/') && text.length > 0 && text.length < 20) {
                 return text;
             }
-            
+
             // 如果有title属性且长度合适
             const title = el.getAttribute('title');
-            if (title && title.length > 0 && title.length < 20 && 
+            if (title && title.length > 0 && title.length < 20 &&
                 !title.includes('时间') && !title.includes('点赞')) {
                 return title;
             }
-            
+
             // 如果文本短且不包含明显的非用户名内容
-            if (text.length > 1 && text.length < 15 && 
-                !text.includes('点赞') && !text.includes('回复') && 
+            if (text.length > 1 && text.length < 15 &&
+                !text.includes('点赞') && !text.includes('回复') &&
                 !text.includes('关注') && !text.includes('分享') &&
                 !/\d+小时|分钟|秒前/.test(text)) {
                 return text;
@@ -1254,17 +1381,17 @@ class BilibiliExtractor extends BaseExtractor {
         }
         return null;
     }
-    
+
     // 提取内容的回退方法
     extractContentFallback(element) {
         // 查找最长的文本内容
         let longestText = '';
         const textElements = element.querySelectorAll('*');
-        
+
         for (const el of textElements) {
             const text = el.textContent.trim();
             // 过滤明显不是评论内容的元素
-            if (text.length > longestText.length && 
+            if (text.length > longestText.length &&
                 text.length > 10 && text.length < 2000 &&
                 !text.includes('点击') && !text.includes('查看') &&
                 !text.includes('下载') && !text.includes('登录') &&
@@ -1272,10 +1399,10 @@ class BilibiliExtractor extends BaseExtractor {
                 longestText = text;
             }
         }
-        
+
         return longestText || null;
     }
-    
+
     // 提取时间的回退方法
     extractTimeFallback(element) {
         // 查找可能是时间的文本
@@ -1283,7 +1410,7 @@ class BilibiliExtractor extends BaseExtractor {
         for (const el of timeElements) {
             const text = el.textContent.trim();
             const title = el.getAttribute('title');
-            
+
             // 检查时间模式
             if (this.isTimePattern(text) || this.isTimePattern(title)) {
                 return text || title;
@@ -1291,17 +1418,17 @@ class BilibiliExtractor extends BaseExtractor {
         }
         return null;
     }
-    
+
     // 判断是否是时间模式
     isTimePattern(text) {
         if (!text) return false;
-        
+
         const timePatterns = [
             /\d+秒前/, /\d+分钟前/, /\d+小时前/, /\d+天前/,
             /\d{4}-\d{2}-\d{2}/, /\d{2}-\d{2}/, /\d{2}:\d{2}/,
             /刚刚/, /昨天/, /前天/
         ];
-        
+
         return timePatterns.some(pattern => pattern.test(text));
     }
 }
