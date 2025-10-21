@@ -22,6 +22,9 @@ class CommentInsightPopup {
             // 初始化UI事件监听器
             this.initializeEventListeners();
 
+            // 监听标签页切换
+            this.setupTabListener();
+
             // 检测当前平台
             await this.detectPlatform();
 
@@ -31,6 +34,139 @@ class CommentInsightPopup {
         } catch (error) {
             console.error('初始化弹出窗口失败:', error);
             this.showNotification('初始化失败: ' + error.message, 'error');
+        }
+    }
+
+    setupTabListener() {
+        // 监听活动标签页变化
+        chrome.tabs.onActivated.addListener(async (activeInfo) => {
+            await this.onTabChanged(activeInfo.tabId, { isTabSwitch: true });
+        });
+
+        // 监听标签页更新（URL变化或标题变化）
+        chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+            // 只处理当前活动标签页的更新
+            const currentTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (currentTabs.length > 0 && currentTabs[0].id === tabId) {
+                // URL变化时立即更新
+                if (changeInfo.url) {
+                    console.log('检测到URL变化:', changeInfo.url);
+                    await this.onTabChanged(tabId, { isUrlChange: true });
+                }
+                // 页面加载完成时更新标题（无论URL是否变化）
+                if (changeInfo.status === 'complete' && this.currentTab && this.currentTab.id === tabId) {
+                    console.log('页面加载完成，更新标题');
+                    await this.updateTabTitle(tabId);
+                }
+            }
+        });
+    }
+
+    async onTabChanged(tabId, changeInfo = {}) {
+        try {
+            // 获取新的标签页信息
+            const tab = await chrome.tabs.get(tabId);
+            
+            // 检查是否是插件自己的页面（viewer.html, options.html等）
+            const isExtensionPage = tab.url && tab.url.startsWith('chrome-extension://');
+            
+            // 如果是插件页面，不更新面板
+            if (isExtensionPage) {
+                console.log('切换到插件页面，保持当前状态');
+                return;
+            }
+            
+            // 如果URL没有变化，只更新标题
+            if (this.currentTab && this.currentTab.url === tab.url) {
+                // 只更新标题，不重新加载数据
+                if (this.currentTab.title !== tab.title) {
+                    this.currentTab.title = tab.title;
+                    this.updatePlatformUI();
+                }
+                return;
+            }
+
+            // URL变化了，完全重置状态
+            // 区分场景：TAB切换时使用当前标题，URL变化时使用临时标题
+            if (changeInfo.isTabSwitch) {
+                // TAB切换：页面已经加载完成，直接使用tab的标题
+                this.currentTab = tab;
+                console.log('TAB切换，使用当前标题:', tab.title);
+            } else if (changeInfo.isUrlChange) {
+                // URL变化：页面正在加载，使用临时标题
+                this.currentTab = {
+                    id: tab.id,
+                    url: tab.url,
+                    title: '加载中...'
+                };
+                console.log('URL变化，等待标题加载');
+            } else {
+                // 其他情况，使用tab的标题
+                this.currentTab = tab;
+            }
+            
+            this.currentComments = [];
+            this.currentAnalysis = null;
+
+            // 重新检测平台
+            // TAB切换时可以立即获取标题，URL变化时等页面加载完成
+            await this.detectPlatform(changeInfo.isTabSwitch);
+
+            // 加载新页面的数据（从历史记录恢复）
+            await this.loadSavedData();
+
+            console.log('页面已切换，面板已更新');
+        } catch (error) {
+            console.error('页面切换处理失败:', error);
+        }
+    }
+
+    async updateTabTitle(tabId) {
+        try {
+            const tab = await chrome.tabs.get(tabId);
+            
+            if (!this.currentTab || this.currentTab.id !== tabId) {
+                return;
+            }
+
+            // 等待一段时间确保页面DOM已更新
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // 尝试从content script获取更准确的标题（最多重试3次）
+            if (this.currentPlatform && this.currentPlatform.supported) {
+                let retryCount = 0;
+                let titleUpdated = false;
+                
+                while (retryCount < 3 && !titleUpdated) {
+                    const platformInfo = await this.sendMessageToTab({
+                        action: 'getPlatformInfo'
+                    });
+                    
+                    if (platformInfo.success && platformInfo.title) {
+                        this.currentTab.title = platformInfo.title;
+                        console.log(`页面加载完成，更新标题 (尝试${retryCount + 1}次):`, platformInfo.title);
+                        titleUpdated = true;
+                    } else {
+                        retryCount++;
+                        if (retryCount < 3) {
+                            // 等待后重试
+                            await new Promise(resolve => setTimeout(resolve, 300));
+                        }
+                    }
+                }
+                
+                // 如果所有重试都失败，使用tab的标题
+                if (!titleUpdated) {
+                    this.currentTab.title = tab.title;
+                    console.log('从content script获取标题失败，使用tab标题:', tab.title);
+                }
+            } else {
+                this.currentTab.title = tab.title;
+            }
+            
+            this.updatePlatformUI();
+        } catch (error) {
+            console.warn('更新标题失败:', error);
         }
     }
 
@@ -61,7 +197,7 @@ class CommentInsightPopup {
         });
 
         // 历史记录按钮
-        document.getElementById('history-btn').addEventListener('click', () => {
+        document.getElementById('view-history-btn').addEventListener('click', () => {
             this.viewHistory();
         });
     }
@@ -103,7 +239,7 @@ class CommentInsightPopup {
         };
     }
 
-    async detectPlatform() {
+    async detectPlatform(fetchTitle = true) {
         try {
             if (!this.currentTab) return;
 
@@ -115,8 +251,8 @@ class CommentInsightPopup {
             if (response.success) {
                 this.currentPlatform = response.platform;
                 
-                // 对于支持的平台，尝试从content script获取更准确的标题
-                if (this.currentPlatform.supported) {
+                // 只在需要时获取标题（初始化时获取，URL变化时不获取，等页面加载完成再获取）
+                if (fetchTitle && this.currentPlatform.supported) {
                     try {
                         const platformInfo = await this.sendMessageToTab({
                             action: 'getPlatformInfo'
@@ -124,6 +260,7 @@ class CommentInsightPopup {
                         
                         if (platformInfo.success && platformInfo.title) {
                             this.currentTab.title = platformInfo.title;
+                            console.log('从content script获取标题:', platformInfo.title);
                         }
                     } catch (e) {
                         console.warn('获取平台信息失败:', e);
@@ -172,11 +309,11 @@ class CommentInsightPopup {
             const extractBtn = document.getElementById('extract-btn');
             if (this.currentPlatform.supported) {
                 extractBtn.disabled = false;
-                platformIconElement.className = 'w-8 h-8 bg-green-100 text-green-600 rounded-full flex items-center justify-center';
+                platformIconElement.className = 'w-10 h-10 bg-green-100 text-green-600 rounded-full flex items-center justify-center';
             } else {
                 extractBtn.disabled = true;
-                platformIconElement.className = 'w-8 h-8 bg-red-100 text-red-600 rounded-full flex items-center justify-center';
-                this.showNotification('当前平台暂不支持', 'warning');
+                platformIconElement.className = 'w-10 h-10 bg-red-100 text-red-600 rounded-full flex items-center justify-center';
+                // 不在这里显示提示，等用户点击按钮时再提示
             }
         }
     }
@@ -192,10 +329,24 @@ class CommentInsightPopup {
             if (response.success && response.data) {
                 this.currentComments = response.data.comments || [];
                 this.currentAnalysis = response.data.analysis || null;
-                this.updateUI();
+                console.log('从历史记录恢复数据:', {
+                    commentCount: this.currentComments.length,
+                    hasAnalysis: !!this.currentAnalysis
+                });
+            } else {
+                // 没有历史数据，重置为空
+                this.currentComments = [];
+                this.currentAnalysis = null;
             }
+            
+            // 更新UI显示
+            this.updateUI();
         } catch (error) {
             console.warn('加载已保存数据失败:', error);
+            // 出错时也要重置数据
+            this.currentComments = [];
+            this.currentAnalysis = null;
+            this.updateUI();
         }
     }
 
@@ -229,6 +380,7 @@ class CommentInsightPopup {
             }
 
             this.setLoadingState('extract', true);
+            this.showNotification('正在提取评论，请勿关闭侧边栏...', 'warning');
 
             const response = await this.sendMessage({
                 action: 'extractComments',
@@ -269,6 +421,7 @@ class CommentInsightPopup {
             }
 
             this.setLoadingState('analyze', true);
+            this.showNotification('正在进行AI分析，请勿关闭侧边栏...', 'warning');
 
             const response = await this.sendMessage({
                 action: 'analyzeComments',
@@ -409,15 +562,27 @@ class CommentInsightPopup {
 
     updateUI() {
         // 更新评论数量
-        document.getElementById('comment-count').textContent = this.currentComments.length;
+        document.getElementById('comments-count').textContent = this.currentComments.length;
 
-        // 更新最后分析时间
-        const lastAnalysisElement = document.getElementById('last-analysis');
+        // 更新分析状态
+        const analysisStatusElement = document.getElementById('analysis-status');
         if (this.currentAnalysis) {
-            const analysisTime = new Date(this.currentAnalysis.timestamp);
-            lastAnalysisElement.textContent = analysisTime.toLocaleString('zh-CN');
+            analysisStatusElement.textContent = '已完成';
+            analysisStatusElement.className = 'text-2xl font-bold text-green-600';
         } else {
-            lastAnalysisElement.textContent = '未分析';
+            analysisStatusElement.textContent = '未分析';
+            analysisStatusElement.className = 'text-2xl font-bold text-gray-400';
+        }
+
+        // 更新最后更新时间
+        const lastUpdateElement = document.getElementById('last-update');
+        if (this.currentComments.length > 0) {
+            const updateTime = this.currentAnalysis 
+                ? new Date(this.currentAnalysis.timestamp)
+                : new Date();
+            lastUpdateElement.textContent = `最后更新: ${updateTime.toLocaleString('zh-CN')}`;
+        } else {
+            lastUpdateElement.textContent = '暂无数据';
         }
 
         // 更新按钮状态

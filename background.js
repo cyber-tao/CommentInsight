@@ -20,6 +20,20 @@ class CommentInsightBackground {
         chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             this.onTabUpdated(tabId, changeInfo, tab);
         });
+
+        // 监听扩展图标点击事件，打开侧边栏
+        chrome.action.onClicked.addListener((tab) => {
+            this.openSidePanel(tab);
+        });
+    }
+
+    async openSidePanel(tab) {
+        try {
+            // 打开侧边栏
+            await chrome.sidePanel.open({ windowId: tab.windowId });
+        } catch (error) {
+            console.error('打开侧边栏失败:', error);
+        }
     }
 
     async onInstalled(details) {
@@ -30,9 +44,9 @@ class CommentInsightBackground {
             ai: {
                 endpoint: 'https://api.openai.com/v1',
                 apiKey: '',
-                model: 'gpt-3.5-turbo',
+                model: 'gpt-4o',
                 temperature: 0.7,
-                maxTokens: 2000,
+                maxTokens: 8192,
                 systemPrompt: '你是一个专业的社交媒体评论分析师。请分析提供的评论数据，生成包含关键洞察、情感分析、主要主题和趋势的结构化摘要。'
             },
             platforms: {
@@ -173,6 +187,15 @@ class CommentInsightBackground {
     }
 
     async detectPlatform(url) {
+        // 检查URL是否有效
+        if (!url || typeof url !== 'string') {
+            return {
+                name: 'unknown',
+                domain: 'unknown',
+                supported: false
+            };
+        }
+
         const platforms = {
             'youtube.com': 'youtube',
             'youtu.be': 'youtube',
@@ -194,11 +217,21 @@ class CommentInsightBackground {
             }
         }
 
-        return {
-            name: 'unknown',
-            domain: new URL(url).hostname,
-            supported: false
-        };
+        // 尝试解析URL获取hostname
+        try {
+            const urlObj = new URL(url);
+            return {
+                name: 'unknown',
+                domain: urlObj.hostname,
+                supported: false
+            };
+        } catch (e) {
+            return {
+                name: 'unknown',
+                domain: 'unknown',
+                supported: false
+            };
+        }
     }
 
     async extractComments(platform, url, config, tabId) {
@@ -245,9 +278,10 @@ class CommentInsightBackground {
                 const remaining = targetCount - all.length;
                 const pageSize = Math.min(100, Math.max(1, remaining));
                 const params = new URLSearchParams({
-                    part: 'snippet',
+                    part: 'snippet,replies',  // 添加replies部分以获取回复
                     videoId: videoId,
                     maxResults: String(pageSize),
+                    order: 'relevance',  // 按热门排序（点赞数）
                     key: apiKey
                 });
                 if (pageToken) params.set('pageToken', pageToken);
@@ -260,15 +294,32 @@ class CommentInsightBackground {
                     throw new Error(data.error?.message || 'YouTube API请求失败');
                 }
 
-                const mapped = (data.items || []).map(item => ({
-                    id: item.id,
-                    author: item.snippet.topLevelComment.snippet.authorDisplayName,
-                    text: item.snippet.topLevelComment.snippet.textOriginal,
-                    timestamp: item.snippet.topLevelComment.snippet.publishedAt,
-                    likes: item.snippet.topLevelComment.snippet.likeCount || 0,
-                    replies: item.snippet.totalReplyCount || 0
-                }));
-                all.push(...mapped);
+                // 处理每个评论线程
+                for (const item of data.items || []) {
+                    const topComment = {
+                        id: item.id,
+                        author: item.snippet.topLevelComment.snippet.authorDisplayName,
+                        text: item.snippet.topLevelComment.snippet.textOriginal,
+                        timestamp: item.snippet.topLevelComment.snippet.publishedAt,
+                        likes: item.snippet.topLevelComment.snippet.likeCount || 0,
+                        replyCount: item.snippet.totalReplyCount || 0,
+                        replies: []
+                    };
+
+                    // 如果有回复，获取回复
+                    if (item.snippet.totalReplyCount > 0 && item.replies && item.replies.comments) {
+                        topComment.replies = item.replies.comments.map(reply => ({
+                            id: reply.id,
+                            author: reply.snippet.authorDisplayName,
+                            text: reply.snippet.textOriginal,
+                            timestamp: reply.snippet.publishedAt,
+                            likes: reply.snippet.likeCount || 0,
+                            isReply: true
+                        }));
+                    }
+
+                    all.push(topComment);
+                }
 
                 pageToken = data.nextPageToken || '';
                 if (!pageToken) break;
@@ -702,6 +753,67 @@ class CommentInsightBackground {
             topics: [],
             trends: []
         };
+    }
+
+    generatePageKey(url) {
+        // 生成URL的唯一标识符
+        try {
+            const urlObj = new URL(url);
+            // 使用域名和路径生成简短的哈希
+            const str = urlObj.hostname + urlObj.pathname + urlObj.search;
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const char = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+            }
+            return Math.abs(hash).toString(36);
+        } catch (error) {
+            // 如果URL解析失败，使用时间戳
+            return Date.now().toString(36);
+        }
+    }
+
+    async addToAnalysisHistory(entry) {
+        try {
+            // 加载现有历史
+            const result = await chrome.storage.local.get('analysis_history');
+            let history = result.analysis_history || [];
+
+            // 生成唯一ID
+            const id = Date.now().toString(36) + Math.random().toString(36).substr(2);
+            const pageKey = this.generatePageKey(entry.url);
+
+            // 添加新条目
+            const newEntry = {
+                id,
+                pageKey,
+                url: entry.url,
+                platform: entry.platform,
+                commentCount: entry.commentCount,
+                timestamp: entry.timestamp,
+                summary: entry.analysis.summary || {}
+            };
+
+            // 检查是否已存在相同URL的记录，如果存在则更新
+            const existingIndex = history.findIndex(h => h.pageKey === pageKey);
+            if (existingIndex >= 0) {
+                history[existingIndex] = newEntry;
+            } else {
+                history.unshift(newEntry);
+            }
+
+            // 限制历史记录数量（最多100条）
+            if (history.length > 100) {
+                history = history.slice(0, 100);
+            }
+
+            // 保存历史
+            await chrome.storage.local.set({ analysis_history: history });
+            console.log('已添加到分析历史');
+        } catch (error) {
+            console.error('添加到分析历史失败:', error);
+        }
     }
 
     async testAIConnection(config) {

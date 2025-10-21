@@ -6,109 +6,175 @@
     <title>评论洞察</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
-        body { width: 400px; height: 600px; }
+        /* 侧边栏样式 - 自适应宽度和高度 */
+        body { 
+            width: 100%; 
+            min-height: 100vh; 
+            margin: 0;
+            padding: 0;
+        }
         .loading { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        
+        /* 侧边栏特定样式 */
+        #sidebar-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
+        .section-card {
+            transition: all 0.2s ease;
+        }
+        
+        .section-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
     </style>
 </head>
 <body class="bg-gray-50">
-    <div id="popup-container" class="h-full flex flex-col">
+    <div id="sidebar-container">
         <!-- 头部 -->
-        <div class="bg-blue-600 text-white p-4 flex justify-between items-center">
-            <h1 class="text-xl font-bold">评论洞察</h1>
-            <button id="settings-btn" class="p-2 hover:bg-blue-700 rounded">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                </svg>
-            </button>
+        <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 shadow-lg">
+            <div class="flex justify-between items-center mb-2">
+                <h1 class="text-xl font-bold">评论洞察</h1>
+                <button id="settings-btn" class="p-2 hover:bg-blue-800 rounded-lg transition" title="设置">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
+                </button>
+            </div>
+            
+            <!-- 当前页面信息 -->
+            <div id="platform-info" class="bg-white bg-opacity-20 rounded-lg p-3">
+                <div class="flex items-center space-x-3">
+                    <div id="platform-icon" class="w-10 h-10 bg-white bg-opacity-30 rounded-full flex items-center justify-center">
+                        <span class="text-sm font-bold">?</span>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="font-semibold text-sm" id="platform-name">检测中...</p>
+                        <p class="text-xs text-blue-100 truncate" id="page-title">正在分析当前页面</p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- 主要内容区域 -->
-        <div class="flex-1 overflow-y-auto">
-            <!-- 平台检测 -->
-            <div id="platform-info" class="p-4 bg-white border-b">
-                <div class="flex items-center space-x-3">
-                    <div id="platform-icon" class="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
-                        <span class="text-sm font-bold">?</span>
+        <div class="flex-1 overflow-y-auto p-4 space-y-4">
+            <!-- 数据统计卡片 -->
+            <div class="bg-white rounded-lg shadow-sm p-4">
+                <h2 class="text-sm font-semibold text-gray-700 mb-3">数据概览</h2>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-blue-50 rounded-lg p-3">
+                        <div class="text-2xl font-bold text-blue-600" id="comments-count">0</div>
+                        <div class="text-xs text-gray-600 mt-1">评论数量</div>
                     </div>
-                    <div>
-                        <p class="font-semibold" id="platform-name">检测中...</p>
-                        <p class="text-sm text-gray-600" id="page-title">正在分析当前页面</p>
+                    <div class="bg-green-50 rounded-lg p-3">
+                        <div class="text-2xl font-bold text-green-600" id="analysis-status">未分析</div>
+                        <div class="text-xs text-gray-600 mt-1">分析状态</div>
                     </div>
+                </div>
+                <div id="last-update" class="text-xs text-gray-500 mt-3 text-center">
+                    暂无数据
                 </div>
             </div>
 
-            <!-- 操作按钮 -->
-            <div class="p-4 space-y-3">
-                <button id="extract-btn" class="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
-                    <span class="extract-text">提取评论</span>
-                    <span class="extract-loading hidden">
-                        <svg class="inline w-4 h-4 loading mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+            <!-- 操作按钮区 -->
+            <div class="space-y-3">
+                <!-- 提取评论 -->
+                <button id="extract-btn" class="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-sm section-card">
+                    <div class="flex items-center justify-center">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"></path>
                         </svg>
-                        提取中...
-                    </span>
+                        <span class="extract-text font-medium">提取评论</span>
+                        <span class="extract-loading hidden">
+                            <svg class="inline w-4 h-4 loading mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            提取中...
+                        </span>
+                    </div>
                 </button>
 
-                <button id="analyze-btn" class="w-full bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                    <span class="analyze-text">AI分析</span>
-                    <span class="analyze-loading hidden">
-                        <svg class="inline w-4 h-4 loading mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                <!-- AI分析 -->
+                <button id="analyze-btn" class="w-full bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-sm section-card">
+                    <div class="flex items-center justify-center">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
                         </svg>
-                        分析中...
-                    </span>
+                        <span class="analyze-text font-medium">AI分析</span>
+                        <span class="analyze-loading hidden">
+                            <svg class="inline w-4 h-4 loading mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            分析中...
+                        </span>
+                    </div>
                 </button>
             </div>
 
-            <!-- 状态信息 -->
-            <div id="status-info" class="p-4 bg-white border-t">
-                <div class="space-y-2">
-                    <div class="flex justify-between">
-                        <span class="text-sm text-gray-600">评论数量:</span>
-                        <span id="comment-count" class="text-sm font-semibold">0</span>
+            <!-- 查看结果区 -->
+            <div class="space-y-2">
+                <button id="view-comments-btn" class="w-full bg-white border-2 border-gray-200 text-gray-700 py-2.5 px-4 rounded-lg hover:border-blue-500 hover:text-blue-600 transition section-card">
+                    <div class="flex items-center justify-center">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-3.582 8-8 8a8.955 8.955 0 01-2.724-.405l-5.055 1.259a1 1 0 01-1.274-1.274l1.259-5.055A8.955 8.955 0 014 12c0-4.418 3.582-8 8-8s8 3.582 8 8z"></path>
+                        </svg>
+                        <span class="text-sm font-medium">查看评论</span>
                     </div>
-                    <div class="flex justify-between">
-                        <span class="text-sm text-gray-600">最后分析:</span>
-                        <span id="last-analysis" class="text-sm text-gray-600">未分析</span>
+                </button>
+
+                <button id="view-analysis-btn" class="w-full bg-white border-2 border-gray-200 text-gray-700 py-2.5 px-4 rounded-lg hover:border-green-500 hover:text-green-600 transition section-card">
+                    <div class="flex items-center justify-center">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                        </svg>
+                        <span class="text-sm font-medium">查看分析</span>
                     </div>
-                </div>
+                </button>
+
+                <button id="view-history-btn" class="w-full bg-white border-2 border-gray-200 text-gray-700 py-2.5 px-4 rounded-lg hover:border-purple-500 hover:text-purple-600 transition section-card">
+                    <div class="flex items-center justify-center">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <span class="text-sm font-medium">历史记录</span>
+                    </div>
+                </button>
             </div>
 
-            <!-- 快速操作 -->
-            <div class="p-4 bg-gray-50">
-                <h3 class="font-semibold mb-2">快速操作</h3>
-                <div class="space-y-2">
-                    <button id="view-comments-btn" class="w-full text-left text-sm bg-white p-2 rounded hover:bg-gray-100 disabled:opacity-50" disabled>
-                        📝 查看评论
-                    </button>
-                    <button id="view-analysis-btn" class="w-full text-left text-sm bg-white p-2 rounded hover:bg-gray-100 disabled:opacity-50" disabled>
-                        📊 查看分析
-                    </button>
-                    <button id="history-btn" class="w-full text-left text-sm bg-white p-2 rounded hover:bg-gray-100">
-                        📜 分析历史
-                    </button>
+            <!-- 提示信息 -->
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <div class="flex items-start">
+                    <svg class="w-5 h-5 text-blue-600 mr-2 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                    </svg>
+                    <div class="text-xs text-blue-800">
+                        <p class="font-medium mb-1">使用提示</p>
+                        <ul class="space-y-1 text-blue-700">
+                            <li>• 切换标签页时面板会自动更新</li>
+                            <li>• 任务运行时请保持侧边栏打开</li>
+                            <li>• 支持YouTube、TikTok、Twitter、Bilibili</li>
+                        </ul>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- 底部信息 -->
-        <div class="bg-white border-t p-2 text-center">
-            <p class="text-xs text-gray-500">评论洞察 v1.0.0</p>
-        </div>
-    </div>
-
-    <!-- 通知区域 -->
-    <div id="notification" class="fixed top-4 right-4 bg-red-500 text-white p-3 rounded-lg shadow-lg transform translate-x-full transition-transform duration-300 z-50">
-        <div class="flex items-center space-x-2">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-            <span id="notification-text"></span>
+        <!-- 通知区域 -->
+        <div id="notification" class="hidden fixed bottom-4 left-4 right-4 bg-white rounded-lg shadow-lg p-4 border-l-4 z-50">
+            <div class="flex items-center">
+                <div id="notification-icon" class="mr-3"></div>
+                <p id="notification-text" class="text-sm flex-1"></p>
+            </div>
         </div>
     </div>
 
     <script src="popup.js"></script>
 </body>
-</html> 
+</html>

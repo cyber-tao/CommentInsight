@@ -8,7 +8,9 @@
     "activeTab",
     "scripting",
     "tabs",
-    "downloads"
+    "downloads",
+    "notifications",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://*.youtube.com/*",
@@ -36,8 +38,10 @@
     }
   ],
   "action": {
-    "default_popup": "popup.html",
     "default_title": "评论洞察"
+  },
+  "side_panel": {
+    "default_path": "popup.html"
   },
   "options_page": "options.html",
   "icons": {

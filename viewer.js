@@ -89,6 +89,8 @@ class CommentInsightViewer {
         document.getElementById('comments-per-page').addEventListener('change', (e) => {
             this.commentsPerPage = parseInt(e.target.value);
             this.currentPage = 1;
+            // 重新计算总页数
+            this.totalPages = Math.ceil(this.filteredComments.length / this.commentsPerPage);
             this.renderComments();
         });
 
@@ -150,6 +152,9 @@ class CommentInsightViewer {
                     this.currentData = response.data;
                     this.filteredComments = [...(this.currentData.comments || [])];
                     this.filterAndSortComments();
+                    
+                    // 显示视频标题链接
+                    this.updateVideoTitle();
                 } else {
                     this.currentData = { comments: [], analysis: null };
                     this.filteredComments = [];
@@ -161,6 +166,19 @@ class CommentInsightViewer {
             this.showNotification('加载数据失败: ' + error.message, 'error');
         } finally {
             this.showLoading(false);
+        }
+    }
+
+    updateVideoTitle() {
+        const titleSection = document.getElementById('video-title-section');
+        const titleLink = document.getElementById('video-title-link');
+        
+        if (this.currentData && this.currentData.title && this.currentData.url) {
+            titleLink.textContent = this.currentData.title;
+            titleLink.href = this.currentData.url;
+            titleSection.classList.remove('hidden');
+        } else {
+            titleSection.classList.add('hidden');
         }
     }
 
@@ -299,6 +317,9 @@ class CommentInsightViewer {
         // 渲染评论卡片
         container.innerHTML = pageComments.map(comment => this.createCommentCard(comment)).join('');
 
+        // 添加回复折叠/展开事件
+        this.attachReplyToggleListeners();
+
         // 渲染分页控件
         this.renderPagination();
 
@@ -308,13 +329,51 @@ class CommentInsightViewer {
         }
     }
 
+    attachReplyToggleListeners() {
+        const toggleButtons = document.querySelectorAll('.toggle-replies');
+        toggleButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const commentId = button.dataset.commentId;
+                const repliesContainer = document.querySelector(`.replies-container[data-comment-id="${commentId}"]`);
+                const svg = button.querySelector('svg');
+                
+                if (repliesContainer) {
+                    repliesContainer.classList.toggle('hidden');
+                    svg.classList.toggle('rotate-180');
+                    
+                    // 更新按钮文本
+                    const isHidden = repliesContainer.classList.contains('hidden');
+                    const replyCount = repliesContainer.querySelectorAll('.flex.items-start').length;
+                    button.childNodes[1].textContent = isHidden ? ` 查看 ${replyCount} 条回复` : ` 隐藏回复`;
+                }
+            });
+        });
+    }
+
     createCommentCard(comment) {
         const timestamp = new Date(comment.timestamp).toLocaleString('zh-CN');
         const likes = comment.likes || 0;
-        const replies = comment.replies || 0;
+        const replyCount = comment.replyCount || 0;
+        const replies = comment.replies || [];
         const safeAuthor = this.escapeHtml(comment.author || '');
         const safeInitial = safeAuthor.charAt(0).toUpperCase();
         const safeText = this.escapeHtml(comment.text || '');
+        const commentId = comment.id || Math.random().toString(36);
+
+        // 生成回复HTML
+        const repliesHTML = replies.length > 0 ? `
+            <div class="mt-4 border-t border-gray-200 pt-4">
+                <button class="toggle-replies text-sm text-blue-600 hover:text-blue-800 flex items-center" data-comment-id="${commentId}">
+                    <svg class="w-4 h-4 mr-1 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                    查看 ${replies.length} 条回复
+                </button>
+                <div class="replies-container hidden mt-3 space-y-3 pl-4 border-l-2 border-gray-200" data-comment-id="${commentId}">
+                    ${replies.map(reply => this.createReplyCard(reply)).join('')}
+                </div>
+            </div>
+        ` : '';
 
         return `
             <div class="comment-card bg-white rounded-lg shadow-sm p-6 border border-gray-200">
@@ -341,7 +400,7 @@ class CommentInsightViewer {
                                     ${likes}
                                 </span>
                             ` : ''}
-                            ${replies > 0 ? `
+                            ${replyCount > 0 && replies.length === 0 ? `
                                 <span class="flex items-center">
                                     <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-3.582 8-8 8a8.955 8.955 0 01-2.724-.405l-5.055 1.259a1 1 0 01-1.274-1.274l1.259-5.055A8.955 8.955 0 014 12c0-4.418 3.582-8 8-8s8 3.582 8 8z"></path>
@@ -350,7 +409,41 @@ class CommentInsightViewer {
                                 </span>
                             ` : ''}
                         </div>
+                        ${repliesHTML}
                     </div>
+                </div>
+            </div>
+        `;
+    }
+
+    createReplyCard(reply) {
+        const timestamp = new Date(reply.timestamp).toLocaleString('zh-CN');
+        const likes = reply.likes || 0;
+        const safeAuthor = this.escapeHtml(reply.author || '');
+        const safeInitial = safeAuthor.charAt(0).toUpperCase();
+        const safeText = this.escapeHtml(reply.text || '');
+
+        return `
+            <div class="flex items-start space-x-3">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
+                        <span class="text-xs font-medium text-gray-600">${safeInitial}</span>
+                    </div>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center justify-between">
+                        <p class="text-sm font-medium text-gray-700">${safeAuthor}</p>
+                        <span class="text-xs text-gray-400">${timestamp}</span>
+                    </div>
+                    <p class="mt-1 text-sm text-gray-600 whitespace-pre-wrap">${safeText}</p>
+                    ${likes > 0 ? `
+                        <div class="mt-2 flex items-center text-xs text-gray-500">
+                            <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                            </svg>
+                            ${likes}
+                        </div>
+                    ` : ''}
                 </div>
             </div>
         `;
@@ -364,13 +457,13 @@ class CommentInsightViewer {
             return;
         }
 
-        let paginationHTML = '<div class="flex items-center space-x-2">';
+        let paginationHTML = '<div class="flex items-center space-x-2" id="pagination-buttons">';
 
         // 上一页按钮
         const prevDisabled = this.currentPage === 1;
         paginationHTML += `
-            <button class="px-3 py-2 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 ${prevDisabled ? 'opacity-50 cursor-not-allowed' : ''}" 
-                    ${prevDisabled ? 'disabled' : ''} onclick="viewer.goToPage(${this.currentPage - 1})">
+            <button class="pagination-btn px-3 py-2 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 ${prevDisabled ? 'opacity-50 cursor-not-allowed' : ''}" 
+                    ${prevDisabled ? 'disabled' : ''} data-page="${this.currentPage - 1}">
                 上一页
             </button>
         `;
@@ -380,7 +473,7 @@ class CommentInsightViewer {
         const endPage = Math.min(this.totalPages, this.currentPage + 2);
 
         if (startPage > 1) {
-            paginationHTML += `<button class="px-3 py-2 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50" onclick="viewer.goToPage(1)">1</button>`;
+            paginationHTML += `<button class="pagination-btn px-3 py-2 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50" data-page="1">1</button>`;
             if (startPage > 2) {
                 paginationHTML += `<span class="px-2 text-gray-500">...</span>`;
             }
@@ -389,8 +482,8 @@ class CommentInsightViewer {
         for (let i = startPage; i <= endPage; i++) {
             const isActive = i === this.currentPage;
             paginationHTML += `
-                <button class="px-3 py-2 text-sm rounded-md ${isActive ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 hover:bg-gray-50'}" 
-                        onclick="viewer.goToPage(${i})">
+                <button class="pagination-btn px-3 py-2 text-sm rounded-md ${isActive ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 hover:bg-gray-50'}" 
+                        data-page="${i}">
                     ${i}
                 </button>
             `;
@@ -400,20 +493,33 @@ class CommentInsightViewer {
             if (endPage < this.totalPages - 1) {
                 paginationHTML += `<span class="px-2 text-gray-500">...</span>`;
             }
-            paginationHTML += `<button class="px-3 py-2 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50" onclick="viewer.goToPage(${this.totalPages})">${this.totalPages}</button>`;
+            paginationHTML += `<button class="pagination-btn px-3 py-2 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50" data-page="${this.totalPages}">${this.totalPages}</button>`;
         }
 
         // 下一页按钮
         const nextDisabled = this.currentPage === this.totalPages;
         paginationHTML += `
-            <button class="px-3 py-2 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 ${nextDisabled ? 'opacity-50 cursor-not-allowed' : ''}" 
-                    ${nextDisabled ? 'disabled' : ''} onclick="viewer.goToPage(${this.currentPage + 1})">
+            <button class="pagination-btn px-3 py-2 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 ${nextDisabled ? 'opacity-50 cursor-not-allowed' : ''}" 
+                    ${nextDisabled ? 'disabled' : ''} data-page="${this.currentPage + 1}">
                 下一页
             </button>
         `;
 
         paginationHTML += '</div>';
         container.innerHTML = paginationHTML;
+        
+        // 使用事件委托处理分页按钮点击
+        const paginationContainer = container.querySelector('#pagination-buttons');
+        if (paginationContainer) {
+            paginationContainer.addEventListener('click', (e) => {
+                if (e.target.classList.contains('pagination-btn') && !e.target.disabled) {
+                    const page = parseInt(e.target.dataset.page);
+                    if (!isNaN(page)) {
+                        this.goToPage(page);
+                    }
+                }
+            });
+        }
     }
 
     goToPage(page) {
@@ -739,9 +845,20 @@ class CommentInsightViewer {
     async deleteHistoryItem(itemId) {
         this.showConfirmDialog(
             '删除历史记录',
-            '您确定要删除这条历史记录吗？',
+            '您确定要删除这条历史记录吗？这将同时删除相关的评论和分析数据。',
             async () => {
                 try {
+                    // 找到要删除的项
+                    const itemToDelete = this.currentData.history.find(item => item.id === itemId);
+                    
+                    if (itemToDelete && itemToDelete.pageKey) {
+                        // 删除对应的评论和分析数据
+                        await chrome.storage.local.remove([
+                            `comments_${itemToDelete.pageKey}`,
+                            `analysis_${itemToDelete.pageKey}`
+                        ]);
+                    }
+                    
                     // 从历史记录中移除该项
                     this.currentData.history = this.currentData.history.filter(item => item.id !== itemId);
                     
@@ -755,7 +872,7 @@ class CommentInsightViewer {
                     this.renderHistory();
                     this.updateDataInfo();
                     
-                    this.showNotification('历史记录已删除', 'success');
+                    this.showNotification('历史记录及相关数据已删除', 'success');
                 } catch (error) {
                     console.error('删除历史记录失败:', error);
                     this.showNotification('删除失败: ' + error.message, 'error');
