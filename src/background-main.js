@@ -57,7 +57,7 @@ class CommentInsightBackground {
                 model: 'gpt-4o',
                 temperature: 0.7,
                 maxTokens: 8192,
-                systemPrompt: '你是一个专业的社交媒体评论分析师。请分析提供的评论数据，生成包含关键洞察、情感分析、主要主题和趋势的结构化摘要。'
+                systemPrompt: '你是一个专业的社交媒体评论分析师，请分析提供的评论数据，生成结构化分析报告。'
             },
             platforms: {
                 youtube: {
