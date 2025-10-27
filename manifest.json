@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "评论洞察",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "从社交媒体平台提取评论并进行AI分析，生成洞察摘要和情感分析",
   "permissions": [
     "storage",
@@ -21,7 +21,7 @@
     "https://b23.tv/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/background-main.js"
   },
   "content_scripts": [
     {
@@ -33,7 +33,15 @@
         "https://*.bilibili.com/*",
         "https://b23.tv/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "src/utils/common.js",
+        "src/extractors/base-extractor.js",
+        "src/extractors/youtube-extractor.js",
+        "src/extractors/tiktok-extractor.js",
+        "src/extractors/twitter-extractor.js",
+        "src/extractors/bilibili-extractor.js",
+        "src/content-main.js"
+      ],
       "run_at": "document_end"
     }
   ],
@@ -51,3 +59,4 @@
   },
   "web_accessible_resources": []
 }
+

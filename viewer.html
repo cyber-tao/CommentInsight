@@ -6,244 +6,188 @@
     <title>评论洞察 - 查看器</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
+        .highlight { background-color: #fef08a; font-weight: 600; }
         .loading { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        .comment-card { transition: all 0.3s ease; }
-        .comment-card:hover { transform: translateY(-2px); }
-        .highlight { background-color: #fef3c7; }
-        .markdown-content h1, .markdown-content h2, .markdown-content h3 { 
-            font-weight: bold; 
-            margin: 1rem 0 0.5rem 0; 
+        
+        .markdown-content {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
         }
-        .markdown-content h1 { font-size: 1.5rem; }
-        .markdown-content h2 { font-size: 1.25rem; }
-        .markdown-content h3 { font-size: 1.1rem; }
-        .markdown-content ul, .markdown-content ol { 
-            margin: 0.5rem 0; 
-            padding-left: 1.5rem; 
+        .markdown-content th {
+            background-color: #f3f4f6;
+            padding: 12px;
+            text-align: left;
+            border: 1px solid #e5e7eb;
+            font-weight: 600;
         }
-        .markdown-content li { margin: 0.25rem 0; }
-        .markdown-content p { margin: 0.5rem 0; }
-        .markdown-content hr { 
-            margin: 1rem 0; 
-            border: 0; 
-            border-top: 1px solid #e5e7eb; 
+        .markdown-content td {
+            padding: 12px;
+            border: 1px solid #e5e7eb;
         }
-        .markdown-content table { 
-            border-collapse: collapse; 
-            width: 100%; 
-            margin: 1rem 0; 
-        }
-        .markdown-content th, .markdown-content td { 
-            border: 1px solid #e5e7eb; 
-            padding: 0.5rem; 
-            text-align: left; 
-        }
-        .markdown-content th { 
-            background-color: #f9fafb; 
-            font-weight: bold; 
-        }
-        .markdown-content details { 
-            margin: 1rem 0; 
-        }
-        .markdown-content summary { 
-            cursor: pointer; 
-            font-weight: bold; 
-        }
-        .markdown-content em { 
-            font-style: italic; 
-        }
-        .markdown-content strong { 
-            font-weight: bold; 
+        .markdown-content tr:nth-child(even) {
+            background-color: #f9fafb;
         }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-    <!-- 头部导航 -->
-    <nav class="bg-white shadow-sm border-b">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <h1 class="text-xl font-bold text-gray-900">评论洞察</h1>
-                    <nav class="ml-8 flex space-x-4">
-                        <button id="nav-comments" class="nav-btn px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-700">
-                            📝 评论
-                        </button>
-                        <button id="nav-analysis" class="nav-btn px-3 py-2 rounded-md text-sm font-medium text-gray-500 hover:text-gray-700">
-                            📊 分析
-                        </button>
-                        <button id="nav-history" class="nav-btn px-3 py-2 rounded-md text-sm font-medium text-gray-500 hover:text-gray-700">
-                            📜 历史
-                        </button>
-                    </nav>
-                </div>
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- 顶部导航 -->
+        <div class="bg-white rounded-lg shadow-sm p-6 mb-6">
+            <div class="flex justify-between items-center">
                 <div class="flex items-center space-x-4">
-                    <div id="data-info" class="text-sm text-gray-600">
-                        <span id="total-count">0</span> 项数据
-                    </div>
-                    <button id="export-current" class="bg-blue-600 text-white px-4 py-2 rounded-md text-sm hover:bg-blue-700">
-                        导出当前
-                    </button>
-                    <button id="back-btn" class="text-gray-500 hover:text-gray-700">
+                    <button id="back-btn" class="text-gray-600 hover:text-gray-900 transition">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
                         </svg>
+                    </button>
+                    <h1 class="text-2xl font-bold text-gray-900">评论洞察</h1>
+                </div>
+                
+                <div class="flex items-center space-x-4">
+                    <div class="text-sm text-gray-500">
+                        共 <span id="total-count" class="font-semibold text-blue-600">0</span> 项
+                    </div>
+                    <button id="export-current" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                        导出当前视图
                     </button>
                 </div>
             </div>
-        </div>
-    </nav>
 
-    <!-- 视频标题区域 -->
-    <div id="video-title-section" class="bg-white border-b shadow-sm hidden">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <div class="flex items-center space-x-3">
-                <svg class="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-                </svg>
-                <a id="video-title-link" href="#" target="_blank" class="text-lg font-medium text-blue-600 hover:text-blue-800 hover:underline flex-1 truncate">
+            <!-- 视频标题链接 -->
+            <div id="video-title-section" class="mt-4 hidden">
+                <a id="video-title-link" href="#" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm font-medium">
                     视频标题
                 </a>
             </div>
+            
+            <!-- 视图切换 -->
+            <div class="mt-6 flex space-x-2 border-b border-gray-200">
+                <button id="nav-comments" class="nav-btn px-3 py-2 rounded-md text-sm font-medium">
+                    评论列表
+                </button>
+                <button id="nav-analysis" class="nav-btn px-3 py-2 rounded-md text-sm font-medium">
+                    AI分析
+                </button>
+                <button id="nav-history" class="nav-btn px-3 py-2 rounded-md text-sm font-medium">
+                    历史记录
+                </button>
+            </div>
         </div>
-    </div>
 
-    <!-- 主要内容区域 -->
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        
         <!-- 评论视图 -->
         <div id="comments-view" class="view-container">
-            <!-- 工具栏 -->
-            <div class="bg-white rounded-lg shadow-sm p-4 mb-6">
-                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-4 sm:space-y-0">
-                    <div class="flex items-center space-x-4">
-                        <div class="relative">
-                            <input type="text" id="search-comments" placeholder="搜索评论..." 
-                                   class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                            <svg class="absolute left-3 top-2.5 h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                            </svg>
-                        </div>
-                        <select id="sort-comments" class="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
-                            <option value="timestamp-desc">最新优先</option>
-                            <option value="timestamp-asc">最早优先</option>
-                            <option value="likes-desc">点赞最多</option>
-                            <option value="likes-asc">点赞最少</option>
-                        </select>
-                    </div>
-                    <div class="flex items-center space-x-2">
-                        <span class="text-sm text-gray-600">每页显示：</span>
-                        <select id="comments-per-page" class="border border-gray-300 rounded px-2 py-1 text-sm">
-                            <option value="10">10</option>
-                            <option value="25" selected>25</option>
-                            <option value="50">50</option>
-                            <option value="100">100</option>
-                        </select>
-                    </div>
+            <div class="bg-white rounded-lg shadow-sm p-6 mb-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <input type="text" id="search-comments" placeholder="搜索评论..." 
+                           class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                    <select id="sort-comments" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                        <option value="timestamp-desc">时间（新→旧）</option>
+                        <option value="timestamp-asc">时间（旧→新）</option>
+                        <option value="likes-desc">点赞（高→低）</option>
+                        <option value="likes-asc">点赞（低→高）</option>
+                    </select>
+                    <select id="comments-per-page" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                        <option value="10">每页 10 条</option>
+                        <option value="25" selected>每页 25 条</option>
+                        <option value="50">每页 50 条</option>
+                        <option value="100">每页 100 条</option>
+                    </select>
                 </div>
             </div>
-
-            <!-- 评论列表 -->
-            <div id="comments-container" class="space-y-4">
-                <!-- 评论卡片将在这里动态生成 -->
-            </div>
-
-            <!-- 分页控件 -->
-            <div id="comments-pagination" class="mt-8 flex justify-center">
-                <!-- 分页按钮将在这里动态生成 -->
-            </div>
+            <div id="comments-container" class="space-y-4"></div>
+            <div id="comments-pagination" class="mt-6 flex justify-center"></div>
         </div>
 
         <!-- 分析视图 -->
         <div id="analysis-view" class="view-container hidden">
-            <div class="bg-white rounded-lg shadow-sm p-6">
-                <div id="analysis-content" class="markdown-content">
-                    <p class="text-gray-500 text-center py-8">暂无分析数据</p>
-                </div>
-                
-                <!-- 分析元数据 -->
-                <div id="analysis-metadata" class="mt-8 pt-6 border-t border-gray-200 hidden">
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600">
-                        <div>
-                            <span class="font-medium">分析时间：</span>
-                            <span id="analysis-timestamp">-</span>
-                        </div>
-                        <div>
-                            <span class="font-medium">评论数量：</span>
-                            <span id="analysis-comment-count">-</span>
-                        </div>
-                        <div>
-                            <span class="font-medium">使用模型：</span>
-                            <span id="analysis-model">-</span>
-                        </div>
+            <div id="analysis-metadata" class="bg-white rounded-lg shadow-sm p-6 mb-6">
+                <div class="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                        <p class="text-sm text-gray-500">分析时间</p>
+                        <p id="analysis-timestamp" class="text-lg font-medium">-</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500">评论数量</p>
+                        <p id="analysis-comment-count" class="text-lg font-medium">-</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500">AI模型</p>
+                        <p id="analysis-model" class="text-lg font-medium">-</p>
                     </div>
                 </div>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm p-8">
+                <div id="analysis-content" class="prose max-w-none"></div>
             </div>
         </div>
 
         <!-- 历史视图 -->
         <div id="history-view" class="view-container hidden">
-            <!-- 历史工具栏 -->
-            <div class="bg-white rounded-lg shadow-sm p-4 mb-6">
-                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-4 sm:space-y-0">
-                    <div class="flex items-center space-x-4">
-                        <input type="text" id="search-history" placeholder="搜索历史记录..." 
-                               class="pl-4 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        <select id="filter-platform" class="border border-gray-300 rounded-lg px-3 py-2">
-                            <option value="">所有平台</option>
-                            <option value="youtube">YouTube</option>
-                            <option value="tiktok">TikTok</option>
-                            <option value="instagram">Instagram</option>
-                            <option value="facebook">Facebook</option>
-                            <option value="twitter">Twitter/X</option>
-                            <option value="bilibili">Bilibili</option>
-                        </select>
-                    </div>
-                    <button id="clear-history" class="bg-red-600 text-white px-4 py-2 rounded-md text-sm hover:bg-red-700">
+            <div class="bg-white rounded-lg shadow-sm p-6 mb-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <input type="text" id="search-history" placeholder="搜索历史..." 
+                           class="px-4 py-2 border border-gray-300 rounded-lg">
+                    <select id="filter-platform" class="px-4 py-2 border border-gray-300 rounded-lg">
+                        <option value="">所有平台</option>
+                        <option value="youtube">YouTube</option>
+                        <option value="tiktok">TikTok</option>
+                        <option value="twitter">Twitter/X</option>
+                        <option value="bilibili">Bilibili</option>
+                    </select>
+                    <button id="clear-history" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
                         清空历史
                     </button>
                 </div>
             </div>
-
-            <!-- 历史记录列表 -->
-            <div id="history-container" class="space-y-4">
-                <!-- 历史记录卡片将在这里动态生成 -->
-            </div>
+            <div id="history-container" class="space-y-4"></div>
         </div>
     </div>
 
-    <!-- 加载状态 -->
-    <div id="loading-overlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-lg p-6 flex items-center space-x-3">
-            <svg class="w-6 h-6 loading text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+    <!-- 加载指示器 -->
+    <div id="loading-spinner" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6">
+            <svg class="loading w-10 h-10 text-blue-600 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <span class="text-gray-700">加载中...</span>
+            <p class="mt-4 text-gray-600">加载中...</p>
+        </div>
+    </div>
+
+    <!-- 通知 -->
+    <div id="notification" class="hidden fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg">
+        <div class="flex items-center">
+            <div id="notification-icon" class="mr-3"></div>
+            <p id="notification-message" class="text-sm"></p>
         </div>
     </div>
 
     <!-- 确认对话框 -->
-    <div id="confirm-dialog" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-lg p-6 max-w-md w-mx">
-            <h3 class="text-lg font-medium text-gray-900 mb-4" id="confirm-title">确认操作</h3>
-            <p class="text-gray-600 mb-6" id="confirm-message">您确定要执行此操作吗？</p>
+    <div id="confirm-dialog" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 max-w-md">
+            <h3 id="confirm-title" class="text-lg font-bold mb-2"></h3>
+            <p id="confirm-message" class="text-gray-600 mb-4"></p>
             <div class="flex justify-end space-x-3">
-                <button id="confirm-cancel" class="px-4 py-2 text-gray-500 hover:text-gray-700">取消</button>
-                <button id="confirm-ok" class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">确认</button>
+                <button id="confirm-cancel" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">
+                    取消
+                </button>
+                <button id="confirm-ok" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+                    确定
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- 通知区域 -->
-    <div id="notification" class="fixed top-4 right-4 bg-blue-500 text-white p-3 rounded-lg shadow-lg transform translate-x-full transition-transform duration-300 z-40">
-        <div class="flex items-center space-x-2">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-            <span id="notification-text"></span>
-        </div>
-    </div>
-
-    <script src="viewer.js"></script>
+    <!-- 引入模块化脚本 -->
+    <script src="src/utils/common.js"></script>
+    <script src="src/utils/markdown.js"></script>
+    <script src="src/views/base-view.js"></script>
+    <script src="src/views/comments-view.js"></script>
+    <script src="src/views/analysis-view.js"></script>
+    <script src="src/views/history-view.js"></script>
+    <script src="src/viewer-main.js"></script>
 </body>
-</html> 
+</html>
+

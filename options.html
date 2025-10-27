@@ -98,10 +98,39 @@
                 </div>
                 
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">系统提示词</label>
-                    <textarea id="ai-system-prompt" rows="3" 
-                              class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              placeholder="你是一个专业的社交媒体评论分析师...">你是一个专业的社交媒体评论分析师。请分析提供的评论数据，生成包含关键洞察、情感分析、主要主题和趋势的结构化摘要。</textarea>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        分析提示词模板
+                        <span class="text-xs text-gray-500 ml-2">使用 {comments} 作为评论内容占位符</span>
+                    </label>
+                    <textarea id="ai-analysis-template" rows="8" 
+                              class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                              placeholder="请分析以下社交媒体评论...">请分析以下社交媒体评论，生成结构化的分析报告。评论后面的 [👍 数字] 表示该评论的点赞数，缩进的"↳ 回复:"表示这是对上方评论的回复。点赞数高的评论代表更多用户的共鸣，请结合视频的主题和内容，特别关注这些热门评论和评论-回复之间的互动关系：
+
+{comments}
+
+请按照以下格式输出：
+
+## 关键洞察
+[结合视频主题，总结3-5个主要洞察点，特别关注高点赞评论反映的用户关注点]
+
+## 情感分析
+- 正面情感: X%
+- 中性情感: X%
+- 负面情感: X%
+
+## 主要主题
+1. [主题1]: [描述，标注是否为热门话题]
+2. [主题2]: [描述，标注是否为热门话题]
+3. [主题3]: [描述，标注是否为热门话题]
+
+## 热门评论分析
+[分析点赞数最高的评论，揭示用户最关心的内容]
+
+## 显著趋势
+[描述观察到的趋势和模式]
+
+## 建议
+[结合视频内容和评论反馈，提供可执行的建议]</textarea>
                 </div>
             </div>
 
@@ -139,17 +168,16 @@
                                    class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">导出分析时包含评论</label>
-                            <div class="flex items-center mt-1">
-                                <input type="checkbox" id="export-include-comments" class="mr-2">
-                                <span class="text-sm">在Markdown分析报告中包含评论详情</span>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">导出分析时包含思考内容</label>
-                            <div class="flex items-center mt-1">
-                                <input type="checkbox" id="export-include-thinking" class="mr-2">
-                                <span class="text-sm">在Markdown分析报告中包含AI思考过程</span>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">导出内容设置</label>
+                            <div class="space-y-2">
+                                <div class="flex items-center">
+                                    <input type="checkbox" id="export-include-comments" class="mr-2">
+                                    <span class="text-sm">包含评论详情</span>
+                                </div>
+                                <div class="flex items-center">
+                                    <input type="checkbox" id="export-include-thinking" class="mr-2">
+                                    <span class="text-sm">包含AI思考过程</span>
+                                </div>
                             </div>
                         </div>
                         <div id="export-comments-sort-container" class="hidden">
@@ -190,11 +218,6 @@
                                 <option value="dom">DOM</option>
                             </select>
                             <p class="text-sm text-gray-500 mt-1">TikTok仅支持DOM解析模式</p>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">延迟设置(ms)</label>
-                            <input type="number" id="tiktok-delay" value="1000" min="500" max="5000" 
-                                   class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-black focus:border-black">
                         </div>
                     </div>
                 </div>

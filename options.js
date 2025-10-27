@@ -148,18 +148,17 @@ class CommentInsightOptions {
             ai: {
                 endpoint: 'https://api.openai.com/v1',
                 apiKey: '',
-                model: 'gpt-3.5-turbo',
+                model: 'gpt-4o',
                 temperature: 0.7,
-                maxTokens: 2000,
-                systemPrompt: '你是一个专业的社交媒体评论分析师。请分析提供的评论数据，生成包含关键洞察、情感分析、主要主题和趋势的结构化摘要。'
+                maxTokens: 8192,
+                analysisTemplate: this.getDefaultAnalysisTemplate()
             },
             platforms: {
                 youtube: {
                     apiKey: ''
                 },
                 tiktok: {
-                    mode: 'dom',
-                    delay: 1000
+                    mode: 'dom'
                 },
                 twitter: {
                     mode: 'dom',
@@ -178,6 +177,36 @@ class CommentInsightOptions {
                 }
             }
         };
+    }
+
+    getDefaultAnalysisTemplate() {
+        return `请分析以下社交媒体评论，生成结构化的分析报告。评论后面的 [👍 数字] 表示该评论的点赞数，缩进的"↳ 回复:"表示这是对上方评论的回复。点赞数高的评论代表更多用户的共鸣，请结合视频的主题和内容，特别关注这些热门评论和评论-回复之间的互动关系：
+
+{comments}
+
+请按照以下格式输出：
+
+## 关键洞察
+[结合视频主题，总结3-5个主要洞察点，特别关注高点赞评论反映的用户关注点]
+
+## 情感分析
+- 正面情感: X%
+- 中性情感: X%
+- 负面情感: X%
+
+## 主要主题
+1. [主题1]: [描述，标注是否为热门话题]
+2. [主题2]: [描述，标注是否为热门话题]
+3. [主题3]: [描述，标注是否为热门话题]
+
+## 热门评论分析
+[分析点赞数最高的评论，揭示用户最关心的内容]
+
+## 显著趋势
+[描述观察到的趋势和模式]
+
+## 建议
+[结合视频内容和评论反馈，提供可执行的建议]`;
     }
 
     async populateForm() {
@@ -206,7 +235,7 @@ class CommentInsightOptions {
             document.getElementById('ai-temperature').value = this.config.ai.temperature || 0.7;
             document.getElementById('temperature-value').textContent = this.config.ai.temperature || 0.7;
             document.getElementById('ai-max-tokens').value = this.config.ai.maxTokens || 2000;
-            document.getElementById('ai-system-prompt').value = this.config.ai.systemPrompt || '';
+            document.getElementById('ai-analysis-template').value = this.config.ai.analysisTemplate || this.getDefaultAnalysisTemplate();
 
             // 尝试加载缓存的模型列表
             const hasLoadedModels = await this.loadCachedModels();
@@ -224,7 +253,6 @@ class CommentInsightOptions {
 
             // TikTok
             document.getElementById('tiktok-mode').value = this.config.platforms.tiktok.mode || 'dom';
-            document.getElementById('tiktok-delay').value = this.config.platforms.tiktok.delay || 1000;
 
             // Twitter
             document.getElementById('twitter-mode').value = this.config.platforms.twitter.mode || 'dom';
@@ -266,7 +294,7 @@ class CommentInsightOptions {
                 model: document.getElementById('ai-model').value.trim(),
                 temperature: parseFloat(document.getElementById('ai-temperature').value),
                 maxTokens: parseInt(document.getElementById('ai-max-tokens').value),
-                systemPrompt: document.getElementById('ai-system-prompt').value.trim()
+                analysisTemplate: document.getElementById('ai-analysis-template').value.trim()
             },
             platforms: {
                 youtube: {
@@ -274,7 +302,6 @@ class CommentInsightOptions {
                 },
                 tiktok: {
                     mode: document.getElementById('tiktok-mode').value,
-                    delay: parseInt(document.getElementById('tiktok-delay').value)
                 },
                 twitter: {
                     mode: document.getElementById('twitter-mode').value,
@@ -345,10 +372,6 @@ class CommentInsightOptions {
             return false;
         }
 
-        if (config.platforms.tiktok.delay < 500 || config.platforms.tiktok.delay > 5000) {
-            this.showStatus('TikTok延迟设置必须在500-5000ms之间', 'error');
-            return false;
-        }
 
         // 验证自定义端点
         if (document.getElementById('ai-endpoint-select').value === 'custom') {
@@ -671,7 +694,7 @@ class CommentInsightOptions {
             ai: ['endpoint', 'model', 'temperature', 'maxTokens'],
             platforms: {
                 youtube: [],
-                tiktok: ['mode', 'delay'],
+                tiktok: ['mode'],
                 twitter: ['mode', 'apiVersion'],
                 bilibili: ['mode'],
                 maxComments: [], // 公共配置
