@@ -102,6 +102,14 @@ class CommentExtractor {
                 let result;
 
                 switch (message.action) {
+                    case 'extractYouTubeComments':
+                        if (this.platform === 'youtube') {
+                            result = await this.extractors.youtube.extract(message.config);
+                            sendResponse({ success: true, comments: result });
+                        } else {
+                            sendResponse({ success: false, error: '当前页面不是YouTube' });
+                        }
+                        break;
                     case 'extractTikTokComments':
                         if (this.platform === 'tiktok') {
                             result = await this.extractors.tiktok.extract(message.config);

@@ -245,26 +245,8 @@ class CommentInsightPopup {
     }
 
     getDefaultConfig() {
-        return {
-            ai: {
-                endpoint: 'https://api.openai.com/v1',
-                apiKey: '',
-                model: 'gpt-3.5-turbo',
-                temperature: 0.7,
-                maxTokens: 2000,
-                systemPrompt: '你是一个专业的社交媒体评论分析师。'
-            },
-            platforms: {
-                youtube: { apiKey: '', maxComments: 100 },
-                tiktok: { mode: 'dom', delay: 1000 },
-                instagram: { token: '', appId: '' },
-                facebook: { appId: '', appSecret: '' },
-                twitter: { bearerToken: '', apiVersion: 'v2' },
-                bilibili: { mode: 'dom', delay: 1000, maxScrolls: 20 },
-                // 公共配置
-                maxComments: 100
-            }
-        };
+        // 统一从 DefaultConfig 获取
+        return (typeof DefaultConfig !== 'undefined') ? DefaultConfig : {};
     }
 
     async detectPlatform(fetchTitle = true) {
@@ -585,10 +567,6 @@ class CommentInsightPopup {
         switch (platform) {
             case 'youtube':
                 return this.config.platforms.youtube.apiKey;
-            case 'instagram':
-                return this.config.platforms.instagram.token;
-            case 'facebook':
-                return this.config.platforms.facebook.appId;
             case 'twitter':
                 return this.config.platforms.twitter.bearerToken;
             case 'tiktok':

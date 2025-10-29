@@ -164,11 +164,13 @@ class TwitterExtractor extends BaseExtractor {
 
         return {
             id,
-            parentId: "0", // Twitter提取器目前只提取主评论
+            parentId: "0",
             author,
             text,
             timestamp,
-            likes
+            likes,
+            platform: 'twitter',
+            url: window.location.href
         };
     }
 }

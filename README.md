@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.0.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/manifest-v3-green.svg" alt="Manifest V3">
   <img src="https://img.shields.io/badge/chrome-88%2B-orange.svg" alt="Chrome 88+">
   <img src="https://img.shields.io/badge/license-MIT-brightgreen.svg" alt="License">
@@ -17,12 +17,12 @@
 
 ## 📝 项目简介
 
-评论洞察是一款基于Chrome Manifest V3的浏览器扩展，专为内容创作者、市场分析师和社交媒体管理者设计。它能够从YouTube、TikTok、Twitter/X和哔哩哔哩等主流平台智能提取评论，并通过AI技术生成深度洞察报告，帮助用户快速理解用户反馈、把握舆论趋势、优化内容策略。
+评论洞察是一款基于Chrome Manifest V3的浏览器扩展，专为内容创作者、市场分析师和社交媒体管理者设计。它能够从 YouTube、TikTok、Twitter/X、Bilibili 等主流平台智能提取评论，并通过AI技术生成深度洞察报告，帮助用户快速理解用户反馈、把握舆论趋势、优化内容策略。
 
 ## ✨ 核心特性
 
 ### 🔍 **多平台评论提取**
-- **YouTube**: 官方API提取，高效稳定（支持Shorts视频）
+- **YouTube**: 优先官方 API 提取，失败或未配置 API Key 时自动回退 DOM 提取（含 Shorts）
 - **TikTok**: DOM解析，智能滚动加载
 - **Twitter/X**: 支持API v2和DOM两种提取模式
 - **哔哩哔哩**: 智能DOM穿透Shadow DOM
@@ -93,10 +93,20 @@
 
 ## 🔒 隐私与安全
 
-- **本地存储**: 所有数据存储在用户本地，不上传云端
-- **加密保护**: 敏感配置（API密钥）采用加密存储
+- **本地存储**: 所有数据存储在用户本地 `chrome.storage.local`
+- **敏感配置**: API 密钥存储于本地。建议仅在可信设备上使用；后续将提供可选加密存储
 - **隐私保护**: AI分析时自动过滤个人身份信息
 - **合规操作**: 严格遵守各平台服务条款和API政策
+
+## ⚙️ 配置说明（统一配置源）
+
+项目内新增 `src/utils/default-config.js` 作为唯一默认配置来源：
+- 后台、弹窗与配置页均从此读取默认值；用户修改后保存到 `chrome.storage.local/config`
+- 清理了 Instagram/Facebook 相关配置项（当前版本未提供支持）
+
+## 🧩 Markdown 渲染
+
+查看器使用轻量 Markdown 解析器（snarkdown）+定制样式，支持折叠 `<think>` 思考内容、列表、标题与表格（表格采用简化解析）。
 
 ## 📄 许可证
 

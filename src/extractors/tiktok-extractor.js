@@ -231,7 +231,9 @@ class TikTokExtractor extends BaseExtractor {
                 author,
                 text,
                 timestamp,
-                likes
+                likes,
+                platform: 'tiktok',
+                url: window.location.href
             };
         } catch (error) {
             console.warn('提取评论数据失败:', error);

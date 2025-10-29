@@ -13,7 +13,7 @@ class MarkdownUtils {
         
         // 处理<br>标签
         safe = safe.replace(/&lt;br&gt;/g, '<br>');
-        safe = safe.replace(/&lt;br\/&gt;/g, '<br>');
+        safe = safe.replace(/&lt;br\/>/g, '<br>');
         
         // 处理表格
         safe = this.processMarkdownTables(safe);

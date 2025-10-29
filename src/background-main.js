@@ -4,6 +4,7 @@
 
 // 导入所有服务模块（Service Worker环境需要使用importScripts）
 importScripts(
+    'utils/default-config.js',
     'services/platform-detector.js',
     'services/storage-service.js',
     'services/ai-service.js',
@@ -50,44 +51,13 @@ class CommentInsightBackground {
     async onInstalled(details) {
         console.log('评论洞察扩展已安装/更新', details);
 
-        const defaultConfig = {
-            ai: {
-                endpoint: 'https://api.openai.com/v1',
-                apiKey: '',
-                model: 'gpt-4o',
-                temperature: 0.7,
-                maxTokens: 8192,
-                systemPrompt: '你是一个专业的社交媒体评论分析师，请分析提供的评论数据，生成结构化分析报告。'
-            },
-            platforms: {
-                youtube: {
-                    apiKey: '',
-                    maxComments: 100
-                },
-                tiktok: {
-                    mode: 'dom',
-                    delay: 1000
-                },
-                twitter: {
-                    mode: 'dom',
-                    bearerToken: '',
-                    apiVersion: 'v2'
-                },
-                bilibili: {
-                    mode: 'dom',
-                    delay: 1000,
-                    maxScrolls: 20
-                },
-                maxComments: 100,
-                export: {
-                    includeComments: false,
-                    commentsSort: 'timestamp-desc'
-                }
-            }
-        };
-
         if (details.reason === 'install') {
-            await StorageService.saveData({ config: defaultConfig });
+            await StorageService.saveData({ config: DefaultConfig });
+        } else if (details.reason === 'update') {
+            const existing = await StorageService.loadData('config');
+            if (!existing) {
+                await StorageService.saveData({ config: DefaultConfig });
+            }
         }
     }
 
@@ -177,6 +147,14 @@ class CommentInsightBackground {
                     sendResponse({ success: true });
                     break;
 
+                case 'extractProgress':
+                    // 内容脚本的进度心跳，仅用于保持后台知情与日志记录
+                    try {
+                        console.log('[Progress]', message?.platform || 'unknown', message?.stage || '', message?.payload || {});
+                    } catch (_) {}
+                    sendResponse({ success: true });
+                    break;
+
                 case 'getConfig':
                     const config = await StorageService.loadData('config');
                     sendResponse({ success: true, data: config });
@@ -218,8 +196,28 @@ class CommentInsightBackground {
             console.log(`开始提取${platform}平台的评论`);
 
             switch (platform) {
-                case 'youtube':
-                    return await CommentExtractorService.extractYouTubeComments(url, config);
+                case 'youtube': {
+                    const apiKey = (config && config.platforms && config.platforms.youtube && config.platforms.youtube.apiKey) || '';
+                    if (apiKey) {
+                        try {
+                            return await CommentExtractorService.extractYouTubeComments(url, config);
+                        } catch (apiError) {
+                            console.warn('YouTube API 提取失败，回退到 DOM 提取:', apiError?.message || apiError);
+                            return await CommentExtractorService.extractViaContentScript(
+                                tabId,
+                                'extractYouTubeComments',
+                                config
+                            );
+                        }
+                    } else {
+                        // 无 API Key，直接使用 DOM 提取
+                        return await CommentExtractorService.extractViaContentScript(
+                            tabId,
+                            'extractYouTubeComments',
+                            config
+                        );
+                    }
+                }
 
                 case 'tiktok':
                     return await CommentExtractorService.extractViaContentScript(

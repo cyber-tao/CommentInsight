@@ -92,11 +92,13 @@ class YouTubeExtractor extends BaseExtractor {
         
         return {
             id,
-            parentId: "0", // YouTube提取器目前只提取主评论
+            parentId: "0",
             author: author,
             text: text,
             timestamp: timestamp,
-            likes: likes
+            likes: likes,
+            platform: 'youtube',
+            url: window.location.href
         };
     }
 }
