@@ -65,13 +65,17 @@ class CommonUtils {
      * @returns {string}
      */
     static generatePageKey(url) {
-        let hash = 0;
-        for (let i = 0; i < url.length; i++) {
-            const char = url.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
+        if (!url) {
+            return this.generateStableId(String(Date.now()));
         }
-        return Math.abs(hash).toString(36).substring(0, 16);
+
+        try {
+            const urlObj = new URL(url);
+            const keySource = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}${urlObj.search}`;
+            return this.generateStableId(keySource);
+        } catch (error) {
+            return this.generateStableId(String(url));
+        }
     }
 
     /**
@@ -214,10 +218,10 @@ class CommonUtils {
     /**
      * 等待DOM元素出现
      * @param {string} selector - CSS选择器
-     * @param {number} timeout - 超时时间（毫秒）
+     * @param {number} maxWaitTime - 最大等待时间（毫秒），0表示无限等待
      * @returns {Promise<Element>}
      */
-    static waitForElement(selector, timeout = 5000) {
+    static waitForElement(selector, maxWaitTime = 30000) {
         return new Promise((resolve, reject) => {
             const element = document.querySelector(selector);
             if (element) {
@@ -229,6 +233,7 @@ class CommonUtils {
                 const element = document.querySelector(selector);
                 if (element) {
                     observer.disconnect();
+                    if (timeoutId) clearTimeout(timeoutId);
                     resolve(element);
                 }
             });
@@ -238,10 +243,14 @@ class CommonUtils {
                 subtree: true
             });
 
-            setTimeout(() => {
-                observer.disconnect();
-                reject(new Error(`等待元素超时: ${selector}`));
-            }, timeout);
+            // 如果设置了最大等待时间，则在超时后停止观察
+            let timeoutId = null;
+            if (maxWaitTime > 0) {
+                timeoutId = setTimeout(() => {
+                    observer.disconnect();
+                    reject(new Error(`等待元素超时: ${selector} (${maxWaitTime}ms)`));
+                }, maxWaitTime);
+            }
         });
     }
 }

@@ -164,11 +164,33 @@ class CommentExtractor {
                                         pageDescription = descElement.textContent.trim();
                                     }
                                 } else if (this.platform === 'tiktok') {
-                                    const descElement = document.querySelector('[data-e2e="new-desc-span"]');
-                                    if (descElement) {
-                                        pageTitle = descElement.textContent.trim();
-                                        pageDescription = pageTitle; // TikTok的描述就是标题
-                                    }
+                    const descriptionSelectors = [
+                        '[data-e2e="browse-video-desc"]',
+                        '[data-e2e="video-desc"]',
+                        '[data-e2e="new-desc"]',
+                        '[data-e2e="new-desc-span"]'
+                    ];
+
+                    let descText = '';
+                    for (const selector of descriptionSelectors) {
+                        const descNode = document.querySelector(selector);
+                        if (descNode && descNode.textContent && descNode.textContent.trim()) {
+                            descText = descNode.textContent.trim();
+                            break;
+                        }
+                    }
+
+                    if (!descText) {
+                        const metaDesc = document.querySelector('meta[name="description"]');
+                        if (metaDesc && metaDesc.content) {
+                            descText = metaDesc.content.trim();
+                        }
+                    }
+
+                    if (descText) {
+                        pageTitle = descText;
+                        pageDescription = descText;
+                    }
                                 } else if (this.platform === 'bilibili') {
                                     const startTime = Date.now();
                                     while (Date.now() - startTime < 2000) {

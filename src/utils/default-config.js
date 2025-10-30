@@ -43,24 +43,19 @@ const DefaultConfig = {
     platforms: {
         youtube: {
             apiKey: '',
-            maxComments: 100,
-            extractionTimeoutMs: 90000
+            maxComments: 100
         },
         tiktok: {
-            mode: 'dom',
-            extractionTimeoutMs: 60000
+            mode: 'dom'
         },
         twitter: {
             mode: 'dom',
             bearerToken: '',
-            apiVersion: 'v2',
-            extractionTimeoutMs: 60000
+            apiVersion: 'v2'
         },
         bilibili: {
             mode: 'dom',
-            delay: 1000,
-            maxScrolls: 20,
-            extractionTimeoutMs: 120000
+            delay: 1000
         },
         maxComments: 100,
         export: {

@@ -7,7 +7,7 @@ class TwitterExtractor extends BaseExtractor {
         try {
             console.log('开始提取Twitter评论');
 
-            await this.waitForElement('[data-testid="tweet"]', 10000);
+            await this.waitForElement('[data-testid="tweet"]');
             await this.delay(2000);
 
             const maxComments = config.platforms?.maxComments || 100;
@@ -17,10 +17,9 @@ class TwitterExtractor extends BaseExtractor {
             const seenIds = new Set();
             let lastCommentCount = 0;
             let noNewCommentsCount = 0;
-            const maxScrollAttempts = 50;
-            let scrollAttempts = 0;
+            let scrollCount = 0;
 
-            while (comments.length < maxComments && scrollAttempts < maxScrollAttempts) {
+            while (comments.length < maxComments) {
                 window.scrollTo(0, document.documentElement.scrollHeight);
                 await this.delay(2000);
 
@@ -40,7 +39,8 @@ class TwitterExtractor extends BaseExtractor {
                     }
                 }
 
-                console.log(`第${scrollAttempts + 1}次滚动，当前评论数: ${comments.length}`);
+                scrollCount++;
+                console.log(`当前评论数: ${comments.length}/${maxComments}`);
 
                 if (comments.length === lastCommentCount) {
                     noNewCommentsCount++;
@@ -52,8 +52,6 @@ class TwitterExtractor extends BaseExtractor {
                     noNewCommentsCount = 0;
                     lastCommentCount = comments.length;
                 }
-
-                scrollAttempts++;
             }
 
             console.log(`成功提取${comments.length}条Twitter评论`);

@@ -135,7 +135,7 @@ class HistoryView extends BaseView {
     async openHistoryItem(itemId) {
         const item = this.viewer.currentData.history.find(h => h.id === itemId);
         if (item) {
-            const key = item.dataKey || itemId;
+            const key = item.storageKey || item.dataKey || itemId;
             const url = chrome.runtime.getURL(`viewer.html?type=comments&key=${key}`);
             window.open(url, '_blank');
         }
@@ -155,14 +155,15 @@ class HistoryView extends BaseView {
                     
                     console.log('删除历史记录项:', itemToDelete);
                     
-                    // 使用 dataKey（不是 pageKey）
-                    if (itemToDelete && itemToDelete.dataKey) {
-                        console.log('删除存储键:', `comments_${itemToDelete.dataKey}`);
-                        await chrome.storage.local.remove([
-                            `comments_${itemToDelete.dataKey}`
-                        ]);
+                    // 使用存储键删除对应数据
+                    const targetKey = itemToDelete?.storageKey || itemToDelete?.dataKey;
+
+                    if (targetKey) {
+                        const keyName = `comments_${targetKey}`;
+                        console.log('删除存储键:', keyName);
+                        await chrome.storage.local.remove([keyName]);
                     } else {
-                        console.warn('历史记录项没有dataKey字段:', itemToDelete);
+                        console.warn('历史记录项缺少存储键:', itemToDelete);
                     }
                     
                     // 从历史记录数组中移除
@@ -198,17 +199,15 @@ class HistoryView extends BaseView {
                     const history = this.viewer.currentData.history || [];
                     
                     // 删除所有相关的评论数据
-                    const keysToDelete = [];
-                    history.forEach(item => {
-                        if (item.dataKey) {
-                            keysToDelete.push(`comments_${item.dataKey}`);
-                        }
-                    });
+                    const storageKeys = history
+                        .map(item => item.storageKey || item.dataKey)
+                        .filter(Boolean)
+                        .map(key => `comments_${key}`);
+
+                    console.log('清空历史记录，将删除的键:', storageKeys);
                     
-                    console.log('清空历史记录，将删除的键:', keysToDelete);
-                    
-                    if (keysToDelete.length > 0) {
-                        await chrome.storage.local.remove(keysToDelete);
+                    if (storageKeys.length > 0) {
+                        await chrome.storage.local.remove(storageKeys);
                     }
                     
                     // 清空历史记录数组

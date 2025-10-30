@@ -7,6 +7,7 @@ class CommentInsightPopup {
         this.currentAnalysis = null;
         this.config = null;
         this.currentDescription = ''; // 视频简介
+        this.currentStorageKey = null;
         
         this.initializePopup();
     }
@@ -336,50 +337,54 @@ class CommentInsightPopup {
 
     async loadSavedData() {
         try {
-            const currentPageKey = this.generatePageKey();
+            const storageKey = this.generatePageKey();
             const response = await this.sendMessage({
                 action: 'loadData',
-                key: `comments_${currentPageKey}`
+                key: `comments_${storageKey}`
             });
 
             if (response.success && response.data) {
                 this.currentComments = response.data.comments || [];
                 this.currentAnalysis = response.data.analysis || null;
+                this.currentStorageKey = storageKey;
                 console.log('从历史记录恢复数据:', {
                     commentCount: this.currentComments.length,
                     hasAnalysis: !!this.currentAnalysis
                 });
             } else {
-                // 没有历史数据，重置为空
                 this.currentComments = [];
                 this.currentAnalysis = null;
+                this.currentStorageKey = storageKey;
             }
-            
-            // 更新UI显示
+
             this.updateUI();
         } catch (error) {
             console.warn('加载已保存数据失败:', error);
-            // 出错时也要重置数据
             this.currentComments = [];
             this.currentAnalysis = null;
+            this.currentStorageKey = this.generatePageKey();
             this.updateUI();
         }
     }
 
     generatePageKey(url = null) {
-        // 基于URL生成页面唯一键（Unicode安全）
-        // 如果提供url参数，使用该url；否则使用当前标签页url
         const targetUrl = url || (this.currentTab?.url || '');
-        
-        // 使用简单哈希函数确保同一URL生成相同key
-        let hash = 0;
-        for (let i = 0; i < targetUrl.length; i++) {
-            const char = targetUrl.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash; // Convert to 32bit integer
+        return CommonUtils.generatePageKey(targetUrl);
+    }
+
+    async persistDataForKey(data, storageKey) {
+        if (!storageKey) {
+            return;
         }
-        
-        return Math.abs(hash).toString(36).substring(0, 16);
+
+        await this.sendMessage({
+            action: 'saveData',
+            data: {
+                [`comments_${storageKey}`]: data
+            }
+        });
+
+        this.currentStorageKey = storageKey;
     }
 
     getTotalCommentCount(comments) {
@@ -584,10 +589,6 @@ class CommentInsightPopup {
             const url = videoSnapshot ? videoSnapshot.url : this.currentTab.url;
             const title = videoSnapshot ? videoSnapshot.title : this.currentTab.title;
             const platform = videoSnapshot ? videoSnapshot.platform : this.currentPlatform.name;
-            
-            // 基于URL生成pageKey（确保相同视频有相同的key）
-            const currentPageKey = this.generatePageKey(url);
-            
             const data = {
                 comments: this.currentComments,
                 analysis: this.currentAnalysis,
@@ -597,31 +598,30 @@ class CommentInsightPopup {
                 timestamp: new Date().toISOString()
             };
 
+            const storageKey = this.generatePageKey(url);
+
             if (videoSnapshot) {
                 console.log('💾 保存数据（使用快照）:', {
                     title: title,
                     url: url,
-                    pageKey: currentPageKey,
+                    storageKey,
                     commentCount: this.currentComments?.length || 0
                 });
             } else {
                 console.log('💾 保存数据（使用当前标签页）:', {
                     title: title,
                     url: url,
-                    pageKey: currentPageKey,
+                    storageKey,
                     commentCount: this.currentComments?.length || 0
                 });
             }
             
             console.log('评论数据示例:', this.currentComments?.[0]);
 
-            await this.sendMessage({
-                action: 'saveData',
-                data: { [`comments_${currentPageKey}`]: data }
-            });
+            await this.persistDataForKey(data, storageKey);
 
-            // 同时保存到历史记录，传递dataKey
-            await this.saveToHistory(data, currentPageKey);
+            // 同时保存到历史记录
+            await this.saveToHistory(data, storageKey);
 
         } catch (error) {
             console.error('保存数据失败:', error);
@@ -633,10 +633,6 @@ class CommentInsightPopup {
             const url = videoSnapshot.url;
             const title = videoSnapshot.title;
             const platform = videoSnapshot.platform;
-            
-            // 基于URL生成pageKey
-            const currentPageKey = this.generatePageKey(url);
-            
             const data = {
                 comments: comments,
                 analysis: analysis,
@@ -646,31 +642,30 @@ class CommentInsightPopup {
                 timestamp: new Date().toISOString()
             };
 
+            const storageKey = this.generatePageKey(url);
+
             console.log('💾 保存数据（使用快照和独立数据）:', {
                 title: title,
                 url: url,
-                pageKey: currentPageKey,
+                storageKey,
                 commentCount: comments?.length || 0,
                 hasAnalysis: !!analysis
             });
 
-            await this.sendMessage({
-                action: 'saveData',
-                data: { [`comments_${currentPageKey}`]: data }
-            });
+            await this.persistDataForKey(data, storageKey);
 
-            // 同时保存到历史记录，传递dataKey
-            await this.saveToHistory(data, currentPageKey);
+            // 同时保存到历史记录
+            await this.saveToHistory(data, storageKey);
 
         } catch (error) {
             console.error('保存数据失败:', error);
         }
     }
 
-    async saveToHistory(data, dataKey) {
+    async saveToHistory(data, storageKey) {
         try {
             console.log('开始保存历史记录:', {
-                dataKey,
+                storageKey,
                 url: data.url,
                 platform: data.platform,
                 title: data.title
@@ -683,15 +678,17 @@ class CommentInsightPopup {
 
             let history = response.success ? (response.data || []) : [];
             console.log('当前历史记录数量:', history.length);
+            const key = storageKey || this.generatePageKey(data.url);
             
-            // 实现去重逻辑：只对相同的dataKey进行更新，不同的URL应该保留为独立记录
-            const existingIndex = history.findIndex(item => 
-                item.dataKey === dataKey
-            );
+            // 实现去重逻辑：对相同页面的存档进行更新（兼容旧字段）
+            const existingIndex = history.findIndex(item => {
+                return (item.storageKey && item.storageKey === key) || (item.dataKey && item.dataKey === key);
+            });
 
             const historyItem = {
                 id: existingIndex !== -1 ? history[existingIndex].id : Date.now().toString(),
-                dataKey: dataKey,
+                storageKey: key,
+                dataKey: key,
                 platform: data.platform,
                 title: data.title,
                 url: data.url,
@@ -705,6 +702,7 @@ class CommentInsightPopup {
 
             if (existingIndex !== -1) {
                 // 更新现有记录
+                historyItem.timestamp = new Date().toISOString();
                 history[existingIndex] = historyItem;
                 console.log('更新现有历史记录，索引:', existingIndex);
             } else {
@@ -818,7 +816,8 @@ class CommentInsightPopup {
     }
 
     openViewerPage(type) {
-        const url = chrome.runtime.getURL(`viewer.html?type=${type}&key=${this.generatePageKey()}`);
+        const activeKey = this.currentStorageKey || this.generatePageKey();
+        const url = chrome.runtime.getURL(`viewer.html?type=${type}&key=${activeKey}`);
         chrome.tabs.create({ url });
     }
 

@@ -101,47 +101,10 @@ class CommentExtractorService {
                 return;
             }
 
-            // 根据平台/动作选择更宽松的超时时间，避免长时间展开回复时提前超时
-            const platformTimeouts = {
-                extractBilibiliComments: (config && config.platforms && config.platforms.bilibili && config.platforms.bilibili.extractionTimeoutMs) || 120000,
-                extractYouTubeComments: (config && config.platforms && config.platforms.youtube && config.platforms.youtube.extractionTimeoutMs) || 90000,
-                extractTikTokComments: (config && config.platforms && config.platforms.tiktok && config.platforms.tiktok.extractionTimeoutMs) || 60000,
-                extractTwitterComments: (config && config.platforms && config.platforms.twitter && config.platforms.twitter.extractionTimeoutMs) || 60000
-            };
-            const defaultTimeout = (config && config.platforms && config.platforms.extractionTimeoutMs) || 60000;
-            const timeoutMs = platformTimeouts[action] || defaultTimeout;
-
-            let timer = null;
-            const armTimer = () => {
-                if (timer) clearTimeout(timer);
-                timer = setTimeout(() => {
-                    cleanup();
-                    reject(new Error('评论提取超时，请刷新页面后重试'));
-                }, timeoutMs);
-            };
-            const cleanup = () => {
-                try { if (timer) clearTimeout(timer); } catch (_) {}
-                try { chrome.runtime.onMessage.removeListener(progressListener); } catch (_) {}
-            };
-
-            // 监听内容脚本的进度心跳，收到则重置定时器（避免长时间展开期间误判超时）
-            const progressListener = (message, sender) => {
-                try {
-                    if (!sender || !sender.tab || sender.tab.id !== tabId) return;
-                    if (!message || message.action !== 'extractProgress') return;
-                    // 可按平台细分，这里通用处理
-                    armTimer();
-                } catch (_) {}
-            };
-            chrome.runtime.onMessage.addListener(progressListener);
-            armTimer();
-
             chrome.tabs.sendMessage(tabId, {
                 action: action,
                 config: config
             }, (response) => {
-                cleanup();
-
                 if (chrome.runtime.lastError) {
                     reject(new Error('无法连接到页面脚本，请刷新页面后重试'));
                 } else if (response && response.success) {

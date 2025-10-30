@@ -13,48 +13,43 @@ class TikTokExtractor extends BaseExtractor {
             console.log(`目标提取评论数: ${maxComments}`);
 
             const comments = [];
-            const seenTexts = new Set();
-            let lastCommentCount = 0;
-            let noNewCommentsCount = 0;
-            const maxScrollAttempts = 50;
-            let scrollAttempts = 0;
+            const seenIds = new Set();
+            const processedContainers = new Set(); // 记录已处理的容器
+            let stableIterations = 0;
+            let lastCollected = 0;
 
-            while (comments.length < maxComments && scrollAttempts < maxScrollAttempts) {
-                window.scrollTo(0, document.documentElement.scrollHeight);
-                await this.delay(2000);
+            while (comments.length < maxComments) {
+                const scrolled = await this.scrollCommentsSection();
+                await this.delay(800);
 
-                await this.expandAllReplies();
-                await this.delay(1500);
-
-                let commentContainers = document.querySelectorAll('[class*="DivCommentObjectWrapper"]');
+                let commentContainers = Array.from(document.querySelectorAll('[data-e2e="comment-item"]'));
                 if (commentContainers.length === 0) {
-                    commentContainers = document.querySelectorAll('[class*="DivCommentItemWrapper"]');
+                    commentContainers = Array.from(document.querySelectorAll('[class*="DivCommentObjectWrapper"], [class*="DivCommentItemWrapper"]'));
                 }
-                console.log(`找到 ${commentContainers.length} 个评论容器`);
 
                 for (const container of commentContainers) {
                     if (comments.length >= maxComments) break;
 
-                    try {
-                        const mainComment = this.extractCommentFromElement(container, "0");
-                        if (mainComment && !seenTexts.has(mainComment.text)) {
-                            seenTexts.add(mainComment.text);
-                            comments.push(mainComment);
-                            
-                            // 提取该主评论的回复
-                            if (comments.length < maxComments) {
-                                const replyContainer = container.querySelector('[class*="DivReplyContainer"]');
-                                if (replyContainer) {
-                                    const replyComments = replyContainer.querySelectorAll('[class*="DivCommentContentContainer"]');
-                                    for (const replyComment of replyComments) {
-                                        if (comments.length >= maxComments) break;
+                    // 跳过已处理的容器
+                    if (processedContainers.has(container)) continue;
+                    processedContainers.add(container);
 
-                                        const reply = this.extractCommentFromElement(replyComment, mainComment.id);
-                                        if (reply && !seenTexts.has(reply.text)) {
-                                            seenTexts.add(reply.text);
-                                            comments.push(reply);
-                                        }
-                                    }
+                    try {
+                        // 先展开该容器的回复
+                        await this.ensureRepliesExpanded(container);
+                        
+                        // 提取主评论
+                        const mainComment = this.extractCommentFromElement(container, "0");
+                        if (mainComment && !seenIds.has(mainComment.id)) {
+                            seenIds.add(mainComment.id);
+                            comments.push(mainComment);
+
+                            // 提取回复
+                            if (comments.length < maxComments) {
+                                const remaining = maxComments - comments.length;
+                                const replies = this.extractRepliesFromContainer(container, mainComment.id, seenIds, remaining);
+                                if (replies.length) {
+                                    comments.push(...replies);
                                 }
                             }
                         }
@@ -63,20 +58,20 @@ class TikTokExtractor extends BaseExtractor {
                     }
                 }
 
-                console.log(`第${scrollAttempts + 1}次滚动，当前评论数: ${comments.length}`);
+                console.log(`当前评论数: ${comments.length}/${maxComments}`);
 
-                if (comments.length === lastCommentCount) {
-                    noNewCommentsCount++;
-                    if (noNewCommentsCount >= 3) {
-                        console.log('连续3次没有新评论，停止滚动');
+                // 检查是否无新增内容
+                if (comments.length === lastCollected && !scrolled) {
+                    stableIterations++;
+                    if (stableIterations >= 5) {
+                        console.log('多次迭代后无新增内容，停止提取');
                         break;
                     }
                 } else {
-                    noNewCommentsCount = 0;
-                    lastCommentCount = comments.length;
+                    stableIterations = 0;
                 }
 
-                scrollAttempts++;
+                lastCollected = comments.length;
             }
 
             console.log(`成功提取${comments.length}条TikTok评论（包含回复）`);
@@ -94,44 +89,31 @@ class TikTokExtractor extends BaseExtractor {
 
     async expandAllReplies() {
         try {
-            const selectors = [
-                '[class*="DivViewRepliesContainer"]',
-                '[class*="DivViewMoreRepliesWrapper"]',
-                '[data-e2e^="view-more-"]',
-                '[class*="DivReplyActionContainer"] span[role="button"]'
-            ];
+            let clickedAny = false;
+            const maxRounds = 12;
 
-            let allButtons = [];
-            for (const selector of selectors) {
-                const buttons = document.querySelectorAll(selector);
-                allButtons.push(...buttons);
-            }
+            for (let round = 0; round < maxRounds; round++) {
+                const toggles = this.findReplyToggleButtons();
+                if (toggles.length === 0) break;
 
-            console.log(`找到 ${allButtons.length} 个可能的展开按钮`);
+                console.log(`展开回复第 ${round + 1} 轮，目标按钮 ${toggles.length} 个`);
 
-            let expandedCount = 0;
-            for (const button of allButtons) {
-                try {
-                    const buttonText = button.textContent;
-                    if ((buttonText.includes('查看') || buttonText.includes('View') || buttonText.includes('replies')) &&
-                        !buttonText.includes('隐藏') && !buttonText.includes('Hide')) {
-                        button.click();
-                        expandedCount++;
-                        console.log(`点击了展开按钮: ${buttonText.substring(0, 20)}`);
-                        if (expandedCount % 3 === 0) {
-                            await this.delay(800);
-                        }
+                for (const toggle of toggles) {
+                    try {
+                        this.robustClick(toggle);
+                        clickedAny = true;
+                    } catch (error) {
+                        console.warn('展开回复点击失败:', error);
                     }
-                } catch (e) {
-                    console.warn('点击展开按钮失败:', e);
                 }
+
+                await this.delay(500 + Math.floor(Math.random() * 400));
             }
 
-            if (expandedCount > 0) {
-                console.log(`成功展开了 ${expandedCount} 个回复`);
-            }
+            return clickedAny;
         } catch (error) {
             console.warn('展开回复过程出错:', error);
+            return false;
         }
     }
 
@@ -220,7 +202,7 @@ class TikTokExtractor extends BaseExtractor {
             }
 
             // 生成稳定的ID（基于内容和作者）
-            const idString = `${author}_${text.substring(0, 50)}_${timestamp}`;
+            const idString = `${parentId}_${author}_${text.substring(0, 80)}_${timestamp}`;
             const id = CommonUtils.generateStableId(idString);
             
             console.log(`提取到评论: ${author} - ${text.substring(0, 30)}... (${likes} 赞) [parentId: ${parentId}]`);
@@ -239,6 +221,156 @@ class TikTokExtractor extends BaseExtractor {
             console.warn('提取评论数据失败:', error);
             return null;
         }
+    }
+
+    findReplyToggleButtons() {
+        const selectors = [
+            '[data-e2e^="view-more"]',
+            '[data-e2e="view-more-1"]',
+            '[class*="DivViewMoreRepliesWrapper"]',
+            '[class*="DivViewRepliesContainer"]',
+            '[class*="ViewReplies"]',
+            '[class*="ViewMore"]'
+        ];
+
+        const candidates = new Set();
+        selectors.forEach(selector => {
+            document.querySelectorAll(selector).forEach(node => candidates.add(node));
+        });
+
+        return Array.from(candidates).map(node => {
+            if (!(node instanceof HTMLElement)) return null;
+            const clickable = node.closest('button, [role="button"], .css-1ey35vz-5e6d46e3--DivViewRepliesContainer, .css-16mvqis-5e6d46e3--DivViewMoreRepliesWrapper');
+            return (clickable instanceof HTMLElement) ? clickable : node;
+        }).filter((node, index, arr) => {
+            if (!(node instanceof HTMLElement)) return false;
+            if (node.offsetParent === null) return false;
+            // 检查是否在回复容器内（排除"隐藏"按钮通常不在DivViewMoreRepliesWrapper内）
+            const isInReplyContext = node.closest('[class*="DivReplyContainer"], [class*="DivViewMoreRepliesWrapper"]');
+            if (!isInReplyContext) return false;
+            return arr.indexOf(node) === index;
+        });
+    }
+
+    extractRepliesFromContainer(container, parentId, seenIds, remaining) {
+        const replies = [];
+        if (!parentId || parentId === "0" || remaining <= 0) {
+            return replies;
+        }
+
+        const replyElements = this.getReplyElements(container);
+        for (const replyElement of replyElements) {
+            if (replies.length >= remaining) break;
+            const reply = this.extractCommentFromElement(replyElement, parentId);
+            if (!reply) continue;
+            if (seenIds.has(reply.id)) continue;
+            seenIds.add(reply.id);
+            replies.push(reply);
+        }
+
+        return replies;
+    }
+
+    getReplyElements(container) {
+        const selectors = [
+            '[data-e2e="comment-reply-item"]',
+            '[data-e2e="comment-reply"]',
+            '[class*="DivReplyItem"]',
+            '[class*="DivReplyContainer"] [data-e2e="comment-item"]'
+        ];
+
+        const elements = new Set();
+        for (const selector of selectors) {
+            container.querySelectorAll(selector).forEach(el => {
+                if (el && el !== container) {
+                    elements.add(el);
+                }
+            });
+        }
+
+        return Array.from(elements);
+    }
+
+    async scrollCommentsSection() {
+        const scrollContainers = [
+            '[class*="DivCommentWrapper"]',
+            '[class*="DivCommentListContainer"]',
+            '[data-e2e="comment-list"]',
+            '[data-e2e="browse-comment-list"]'
+        ];
+
+        for (const selector of scrollContainers) {
+            const container = document.querySelector(selector);
+            if (container && container instanceof HTMLElement) {
+                const previous = container.scrollTop;
+                container.scrollTop = container.scrollHeight;
+                await this.delay(20);
+                return container.scrollTop !== previous;
+            }
+        }
+
+        const prevY = window.scrollY;
+        window.scrollBy(0, Math.max(window.innerHeight, 800));
+        await this.delay(20);
+        return window.scrollY !== prevY;
+    }
+
+    async ensureRepliesExpanded(container) {
+        // 只展开一次，避免重复展开/折叠
+        const selectors = [
+            '[data-e2e^="view-more"]',
+            '[class*="DivViewMoreRepliesWrapper"]'
+        ];
+
+        const toggles = [];
+        selectors.forEach(selector => {
+            container.querySelectorAll(selector).forEach(element => {
+                if (element instanceof HTMLElement && element.offsetParent !== null) {
+                    // 查找可点击的父元素
+                    const clickable = element.closest('button, [role="button"], .css-1ey35vz-5e6d46e3--DivViewRepliesContainer, .css-16mvqis-5e6d46e3--DivViewMoreRepliesWrapper');
+                    const target = (clickable instanceof HTMLElement) ? clickable : element;
+                    
+                    // 检查是否是"展开"按钮（通过DOM位置判断，第一个按钮是展开，第二个是隐藏）
+                    const wrapper = target.closest('[class*="DivViewMoreRepliesWrapper"]');
+                    if (wrapper) {
+                        const allButtons = wrapper.querySelectorAll('.css-1ey35vz-5e6d46e3--DivViewRepliesContainer, [class*="DivViewRepliesContainer"]');
+                        // 只点击第一个按钮（展开按钮）
+                        if (allButtons.length > 0 && target.closest('.css-1ey35vz-5e6d46e3--DivViewRepliesContainer, [class*="DivViewRepliesContainer"]') === allButtons[0]) {
+                            toggles.push(target);
+                        }
+                    }
+                }
+            });
+        });
+
+        if (toggles.length > 0) {
+            for (const toggle of toggles) {
+                try {
+                    this.robustClick(toggle);
+                    await this.delay(300);
+                } catch (error) {
+                    console.warn('展开回复失败:', error);
+                }
+            }
+            // 等待DOM更新
+            await this.delay(500);
+        }
+    }
+
+    robustClick(element) {
+        if (!(element instanceof HTMLElement)) {
+            return;
+        }
+
+        const events = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+        events.forEach(eventName => {
+            try {
+                const event = new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window });
+                element.dispatchEvent(event);
+            } catch (error) {
+                // 忽略
+            }
+        });
     }
 }
 

@@ -10,7 +10,13 @@ class StorageService {
      */
     static async saveData(data) {
         try {
-            await chrome.storage.local.set(data);
+            const payload = { ...data };
+
+            if (Object.prototype.hasOwnProperty.call(payload, 'config')) {
+                payload.config = this.obfuscateConfig(payload.config);
+            }
+
+            await chrome.storage.local.set(payload);
             console.log('数据保存成功');
         } catch (error) {
             console.error('数据保存失败:', error);
@@ -26,7 +32,13 @@ class StorageService {
     static async loadData(key) {
         try {
             const result = await chrome.storage.local.get(key);
-            return result[key];
+            let value = result[key];
+
+            if (key === 'config' && value) {
+                value = this.deobfuscateConfig(value);
+            }
+
+            return value;
         } catch (error) {
             console.error('数据加载失败:', error);
             throw error;
@@ -54,19 +66,11 @@ class StorageService {
      * @returns {string}
      */
     static generatePageKey(url) {
-        try {
-            const urlObj = new URL(url);
-            const str = urlObj.hostname + urlObj.pathname + urlObj.search;
-            let hash = 0;
-            for (let i = 0; i < str.length; i++) {
-                const char = str.charCodeAt(i);
-                hash = ((hash << 5) - hash) + char;
-                hash = hash & hash;
-            }
-            return Math.abs(hash).toString(36);
-        } catch (error) {
-            return Date.now().toString(36);
-        }
+        return CommonUtils.generatePageKey(url);
+    }
+
+    static getSecretPrefix() {
+        return '__ci::';
     }
 
     /**
@@ -80,20 +84,24 @@ class StorageService {
             let history = result.analysis_history || [];
 
             const id = Date.now().toString(36) + Math.random().toString(36).substr(2);
-            const pageKey = this.generatePageKey(entry.url);
+            const storageKey = this.generatePageKey(entry.url);
 
             const newEntry = {
                 id,
-                pageKey,
+                storageKey,
                 url: entry.url,
                 platform: entry.platform,
                 commentCount: entry.commentCount,
                 timestamp: entry.timestamp,
-                summary: entry.analysis.summary || {}
+                summary: (entry.analysis && entry.analysis.summary) ? entry.analysis.summary : {}
             };
 
-            const existingIndex = history.findIndex(h => h.pageKey === pageKey);
+            const existingIndex = history.findIndex(h => {
+                return h.storageKey === storageKey;
+            });
             if (existingIndex >= 0) {
+                // 保留原有ID，避免影响历史记录引用
+                newEntry.id = history[existingIndex].id;
                 history[existingIndex] = newEntry;
             } else {
                 history.unshift(newEntry);
@@ -107,6 +115,104 @@ class StorageService {
             console.log('已添加到分析历史');
         } catch (error) {
             console.error('添加到分析历史失败:', error);
+        }
+    }
+
+    static obfuscateConfig(config) {
+        if (!config || typeof config !== 'object') {
+            return config;
+        }
+
+        const safeConfig = JSON.parse(JSON.stringify(config));
+
+        if (safeConfig.ai && typeof safeConfig.ai.apiKey === 'string') {
+            safeConfig.ai.apiKey = this.encodeSecret(safeConfig.ai.apiKey);
+        }
+
+        if (safeConfig.platforms) {
+            if (safeConfig.platforms.youtube && typeof safeConfig.platforms.youtube.apiKey === 'string') {
+                safeConfig.platforms.youtube.apiKey = this.encodeSecret(safeConfig.platforms.youtube.apiKey);
+            }
+
+            if (safeConfig.platforms.twitter && typeof safeConfig.platforms.twitter.bearerToken === 'string') {
+                safeConfig.platforms.twitter.bearerToken = this.encodeSecret(safeConfig.platforms.twitter.bearerToken);
+            }
+        }
+
+        return safeConfig;
+    }
+
+    static deobfuscateConfig(config) {
+        if (!config || typeof config !== 'object') {
+            return config;
+        }
+
+        const safeConfig = JSON.parse(JSON.stringify(config));
+
+        if (safeConfig.ai && typeof safeConfig.ai.apiKey === 'string') {
+            safeConfig.ai.apiKey = this.decodeSecret(safeConfig.ai.apiKey);
+        }
+
+        if (safeConfig.platforms) {
+            if (safeConfig.platforms.youtube && typeof safeConfig.platforms.youtube.apiKey === 'string') {
+                safeConfig.platforms.youtube.apiKey = this.decodeSecret(safeConfig.platforms.youtube.apiKey);
+            }
+
+            if (safeConfig.platforms.twitter && typeof safeConfig.platforms.twitter.bearerToken === 'string') {
+                safeConfig.platforms.twitter.bearerToken = this.decodeSecret(safeConfig.platforms.twitter.bearerToken);
+            }
+        }
+
+        return safeConfig;
+    }
+
+    static encodeSecret(value) {
+        if (!value || typeof value !== 'string') {
+            return value;
+        }
+
+        if (value.startsWith(this.getSecretPrefix())) {
+            return value;
+        }
+
+        const key = 'comment-insight-secure-key';
+        let obfuscated = '';
+        for (let i = 0; i < value.length; i++) {
+            const keyChar = key.charCodeAt(i % key.length);
+            const encodedChar = value.charCodeAt(i) ^ keyChar;
+            obfuscated += String.fromCharCode(encodedChar);
+        }
+
+        return `${this.getSecretPrefix()}${btoa(obfuscated)}`;
+    }
+
+    static decodeSecret(value) {
+        if (!value || typeof value !== 'string') {
+            return value || '';
+        }
+
+        const prefix = this.getSecretPrefix();
+        if (!value.startsWith(prefix)) {
+            return value;
+        }
+
+        const encoded = value.slice(prefix.length);
+
+        try {
+            const binary = atob(encoded);
+            const key = 'comment-insight-secure-key';
+            let decoded = '';
+
+            for (let i = 0; i < binary.length; i++) {
+                const keyChar = key.charCodeAt(i % key.length);
+                const originalChar = binary.charCodeAt(i) ^ keyChar;
+                decoded += String.fromCharCode(originalChar);
+            }
+
+            return decoded;
+        } catch (error) {
+            console.warn('解密配置失败:', error);
+            return '';
         }
     }
 }

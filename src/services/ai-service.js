@@ -20,18 +20,18 @@ class AIService {
                 throw new Error('AI API密钥未配置');
             }
 
-            const maxTokens = aiConfig.maxTokens || 8192;
-            const charLimitPerChunk = Math.floor(maxTokens * 2 * 0.7);
+            const normalizedMaxTokens = this.normalizeMaxTokens(aiConfig.maxTokens);
+            const charLimitPerChunk = this.estimateCharLimit(normalizedMaxTokens);
 
-            console.log(`模型最大令牌数: ${maxTokens}, 字符限制: ${charLimitPerChunk}`);
+            console.log(`模型最大令牌数: ${normalizedMaxTokens}, 字符限制: ${charLimitPerChunk}`);
 
             const totalChars = comments.map(c => c.text || '').join('').length;
             const needsChunking = totalChars > charLimitPerChunk;
 
             if (needsChunking) {
                 console.log(`触发分块分析 - 评论数: ${comments.length}, 总字符数: ${totalChars}`);
-                const partials = await this.summarizeInChunks(comments, aiConfig, charLimitPerChunk, videoTitle, videoDescription);
-                const final = await this.finalizeSummary(partials, aiConfig, comments.length, videoTitle, videoDescription);
+                const partials = await this.summarizeInChunks(comments, aiConfig, charLimitPerChunk, normalizedMaxTokens, videoTitle, videoDescription);
+                const final = await this.finalizeSummary(partials, aiConfig, comments.length, normalizedMaxTokens, videoTitle, videoDescription);
                 return {
                     rawAnalysis: final.text,
                     timestamp: new Date().toISOString(),
@@ -58,7 +58,7 @@ class AIService {
             const prompt = this.buildAnalysisPrompt(commentsText, aiConfig.analysisTemplate, videoTitle, videoDescription);
             const data = await this.chatCompletion(aiConfig, [
                 { role: 'user', content: prompt }
-            ], aiConfig.maxTokens);
+            ], normalizedMaxTokens);
 
             if (!data.success) {
                 throw new Error(data.error || 'AI分析请求失败');
@@ -145,11 +145,12 @@ class AIService {
      * @param {Array} comments - 评论数组
      * @param {Object} aiConfig - AI配置
      * @param {number} charLimit - 字符限制
+     * @param {number} normalizedMaxTokens - 归一化后的令牌上限
      * @param {string} videoTitle - 视频标题
      * @param {string} videoDescription - 视频描述
      * @returns {Promise<Object>} 返回{results: Array, tokensUsed: number}
      */
-    static async summarizeInChunks(comments, aiConfig, charLimit, videoTitle = '', videoDescription = '') {
+    static async summarizeInChunks(comments, aiConfig, charLimit, normalizedMaxTokens, videoTitle = '', videoDescription = '') {
         const chunks = [];
         let buffer = [];
         let charCount = 0;
@@ -170,7 +171,7 @@ class AIService {
 
         const results = [];
         let totalTokens = 0;
-        const chunkMaxTokens = Math.floor(aiConfig.maxTokens * 0.4);
+        const chunkMaxTokens = Math.max(256, Math.floor(normalizedMaxTokens * 0.35));
         
         // 构建上下文信息
         let contextPrefix = '';
@@ -219,11 +220,12 @@ class AIService {
      * @param {Object} partialsResult - {results: Array, tokensUsed: number}
      * @param {Object} aiConfig - AI配置
      * @param {number} totalComments - 总评论数
+     * @param {number} normalizedMaxTokens - 归一化后的令牌上限
      * @param {string} videoTitle - 视频标题
      * @param {string} videoDescription - 视频描述
      * @returns {Promise<Object>} 返回{text: string, tokensUsed: number}
      */
-    static async finalizeSummary(partialsResult, aiConfig, totalComments, videoTitle = '', videoDescription = '') {
+    static async finalizeSummary(partialsResult, aiConfig, totalComments, normalizedMaxTokens, videoTitle = '', videoDescription = '') {
         const partials = partialsResult.results;
         let contextInfo = '';
         if (videoTitle) {
@@ -263,9 +265,11 @@ class AIService {
             '[结合视频内容和评论反馈，提供可执行的建议]'
         ].join('\n');
 
+        const summaryTokenBudget = Math.max(512, Math.floor(normalizedMaxTokens * 0.6));
+
         const data = await this.chatCompletion(aiConfig, [
             { role: 'user', content: prompt }
-        ], aiConfig.maxTokens);
+        ], summaryTokenBudget);
         
         if (!data.success) throw new Error(data.error || '汇总失败');
         
@@ -281,38 +285,97 @@ class AIService {
      * @returns {Promise<Object>}
      */
     static async chatCompletion(aiConfig, messages, maxTokens) {
-        try {
-            const response = await fetch(`${aiConfig.endpoint}/chat/completions`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${aiConfig.apiKey}`
-                },
-                body: JSON.stringify({
-                    model: aiConfig.model,
-                    messages,
-                    temperature: aiConfig.temperature,
-                    max_tokens: maxTokens
-                })
-            });
-            
-            const data = await response.json();
-            
-            if (!response.ok) {
-                return { success: false, error: data.error?.message || '请求失败' };
+        const maxAttempts = Math.max(1, aiConfig.retryAttempts || 3);
+        let lastError = null;
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            try {
+                const response = await fetch(`${aiConfig.endpoint}/chat/completions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${aiConfig.apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: aiConfig.model,
+                        messages,
+                        temperature: aiConfig.temperature,
+                        max_tokens: maxTokens
+                    })
+                });
+
+                const rawText = await response.text();
+                let data = null;
+
+                if (rawText && rawText.trim().length > 0) {
+                    try {
+                        data = JSON.parse(rawText);
+                    } catch (parseError) {
+                        // 保留原始文本用于错误提示
+                        console.warn('AI响应不是有效的JSON:', parseError);
+                    }
+                }
+
+                if (!response.ok) {
+                    const retryAfter = response.headers.get('retry-after');
+                    const errorMessage = this.extractErrorMessage(data, rawText, response.status);
+                    lastError = new Error(errorMessage);
+
+                    if (this.shouldRetryStatus(response.status) && attempt < maxAttempts - 1) {
+                        await this.delayForAttempt(attempt, retryAfter);
+                        continue;
+                    }
+
+                    return { success: false, error: errorMessage, status: response.status };
+                }
+
+                if (!data || !Array.isArray(data.choices) || data.choices.length === 0) {
+                    const errorMessage = 'AI响应格式无效';
+                    lastError = new Error(errorMessage);
+
+                    if (attempt < maxAttempts - 1) {
+                        await this.delayForAttempt(attempt);
+                        continue;
+                    }
+
+                    return { success: false, error: errorMessage };
+                }
+
+                const choice = data.choices[0] || {};
+                const text = choice.message?.content || choice.text || '';
+
+                if (!text) {
+                    const errorMessage = 'AI返回内容为空';
+                    lastError = new Error(errorMessage);
+
+                    if (attempt < maxAttempts - 1) {
+                        await this.delayForAttempt(attempt);
+                        continue;
+                    }
+
+                    return { success: false, error: errorMessage };
+                }
+
+                const tokensUsed = data.usage?.total_tokens || data.usage?.completion_tokens || 0;
+
+                return {
+                    success: true,
+                    text,
+                    tokensUsed
+                };
+            } catch (error) {
+                lastError = error;
+
+                if (attempt < maxAttempts - 1) {
+                    await this.delayForAttempt(attempt);
+                    continue;
+                }
+
+                return { success: false, error: error.message };
             }
-            
-            // 提取tokens使用情况
-            const tokensUsed = data.usage?.total_tokens || 0;
-            
-            return { 
-                success: true, 
-                text: data.choices?.[0]?.message?.content || '',
-                tokensUsed: tokensUsed
-            };
-        } catch (e) {
-            return { success: false, error: e.message };
         }
+
+        return { success: false, error: lastError?.message || 'AI请求失败' };
     }
 
     /**
@@ -396,7 +459,7 @@ class AIService {
      * @returns {Object}
      */
     static extractSummaryFromAnalysis(analysisText) {
-        return {
+        const summary = {
             insights: [],
             sentiment: {
                 positive: 0,
@@ -406,6 +469,160 @@ class AIService {
             topics: [],
             trends: []
         };
+
+        if (!analysisText || typeof analysisText !== 'string') {
+            return summary;
+        }
+
+        const normalized = analysisText.replace(/\r\n/g, '\n');
+        const sectionRegex = /##\s+([^\n]+)\n([\s\S]*?)(?=(\n##\s)|$)/g;
+        let match;
+
+        while ((match = sectionRegex.exec(normalized)) !== null) {
+            const heading = match[1].trim();
+            const content = match[2].trim();
+
+            if (/关键洞察/.test(heading)) {
+                summary.insights = this.parseBulletList(content);
+            } else if (/情感分析/.test(heading)) {
+                summary.sentiment = this.parseSentimentBlock(content, summary.sentiment);
+            } else if (/主要主题/.test(heading)) {
+                summary.topics = this.parseTopicsBlock(content);
+            } else if (/显著趋势/.test(heading)) {
+                summary.trends = this.parseBulletList(content);
+            }
+        }
+
+        return summary;
+    }
+
+    static async delayForAttempt(attempt, retryAfterSeconds) {
+        const baseDelay = 600;
+        let delayMs = baseDelay * Math.pow(2, attempt);
+
+        if (retryAfterSeconds) {
+            const parsed = Number(retryAfterSeconds);
+            if (!Number.isNaN(parsed) && parsed > 0) {
+                delayMs = Math.max(delayMs, parsed * 1000);
+            }
+        }
+
+        // 加入轻微随机抖动，避免雪崩
+        const jitter = Math.floor(Math.random() * 250);
+        await CommonUtils.delay(delayMs + jitter);
+    }
+
+    static shouldRetryStatus(status) {
+        if (!status) return true;
+        if (status === 429 || status === 408) return true;
+        return status >= 500;
+    }
+
+    static extractErrorMessage(data, fallbackText, status) {
+        if (data) {
+            if (typeof data === 'string') {
+                return data;
+            }
+
+            if (data.error) {
+                if (typeof data.error === 'string') {
+                    return data.error;
+                }
+
+                if (data.error.message) {
+                    return data.error.message;
+                }
+            }
+
+            if (data.message) {
+                return data.message;
+            }
+        }
+
+        if (fallbackText) {
+            const snippet = fallbackText.trim().substring(0, 200);
+            if (snippet) {
+                return snippet;
+            }
+        }
+
+        return `请求失败 (HTTP ${status || '未知'})`;
+    }
+
+    static normalizeMaxTokens(maxTokens) {
+        const parsed = Number(maxTokens);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+            return 8192;
+        }
+
+        return Math.max(Math.floor(parsed), 128);
+    }
+
+    static estimateCharLimit(maxTokens) {
+        const estimated = Math.floor(maxTokens * 1.6);
+        return Math.max(4096, estimated);
+    }
+
+    static parseBulletList(text) {
+        return text
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0)
+            .map(line => line.replace(/^[-*]\s*/, '').replace(/^\d+\.\s*/, ''))
+            .filter(line => line.length > 0);
+    }
+
+    static parseSentimentBlock(text, fallback) {
+        const sentiment = { ...fallback };
+        const regex = /(正面|中性|负面)[^\d]*([\d.,]+)\s*[%％]?/g;
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+            const key = match[1];
+            const value = parseFloat(match[2].replace(/,/g, '.'));
+            if (Number.isFinite(value)) {
+                if (key.includes('正面')) sentiment.positive = value;
+                if (key.includes('中性')) sentiment.neutral = value;
+                if (key.includes('负面')) sentiment.negative = value;
+            }
+        }
+        return sentiment;
+    }
+
+    static parseTopicsBlock(text) {
+        const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
+        const topics = [];
+
+        lines.forEach(line => {
+            let normalized = line.replace(/^\d+\.\s*/, '').replace(/^[-*]\s*/, '');
+            let title = '';
+            let description = normalized;
+
+            const bracketMatch = normalized.match(/^\[?([^\]]+?)\]?[:：]\s*(.+)$/);
+            if (bracketMatch) {
+                title = bracketMatch[1].trim();
+                description = bracketMatch[2].trim();
+            } else {
+                const colonIndex = normalized.indexOf('：');
+                const colonIndexAlt = normalized.indexOf(':');
+                const index = colonIndex >= 0 ? colonIndex : colonIndexAlt;
+                if (index > 0) {
+                    title = normalized.substring(0, index).replace(/[\[\]]/g, '').trim();
+                    description = normalized.substring(index + 1).trim();
+                } else {
+                    title = normalized.replace(/[\[\]]/g, '').substring(0, 30).trim();
+                }
+            }
+
+            const isHot = /(热门|热点|高频|高热|爆点)/.test(description);
+
+            topics.push({
+                title,
+                description,
+                isHot
+            });
+        });
+
+        return topics.slice(0, 10);
     }
 }
 

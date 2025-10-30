@@ -220,23 +220,19 @@ class CommentInsightOptions {
             // 平台配置
             // YouTube
             document.getElementById('youtube-api-key').value = this.config.platforms.youtube.apiKey || '';
-            document.getElementById('youtube-extraction-timeout').value = this.config.platforms.youtube?.extractionTimeoutMs ?? defaultConfig.platforms.youtube?.extractionTimeoutMs ?? 90000;
             // 使用公共配置的最大评论数
             document.getElementById('platform-max-comments').value = this.config.platforms.maxComments || 100;
 
             // TikTok
             document.getElementById('tiktok-mode').value = this.config.platforms.tiktok.mode || 'dom';
-            document.getElementById('tiktok-extraction-timeout').value = this.config.platforms.tiktok?.extractionTimeoutMs ?? defaultConfig.platforms.tiktok?.extractionTimeoutMs ?? 60000;
 
             // Twitter
             document.getElementById('twitter-mode').value = this.config.platforms.twitter.mode || 'dom';
             document.getElementById('twitter-bearer-token').value = this.config.platforms.twitter.bearerToken || '';
             document.getElementById('twitter-api-version').value = this.config.platforms.twitter.apiVersion || 'v2';
-            document.getElementById('twitter-extraction-timeout').value = this.config.platforms.twitter?.extractionTimeoutMs ?? defaultConfig.platforms.twitter?.extractionTimeoutMs ?? 60000;
 
             // Bilibili
             document.getElementById('bilibili-mode').value = this.config.platforms.bilibili?.mode || 'dom';
-            document.getElementById('bilibili-extraction-timeout').value = this.config.platforms.bilibili?.extractionTimeoutMs ?? defaultConfig.platforms.bilibili?.extractionTimeoutMs ?? 120000;
 
             // 导出配置
             const exportConfig = this.config.platforms.export || {};
@@ -255,13 +251,6 @@ class CommentInsightOptions {
 
     collectFormData() {
         const defaultConfig = this.getDefaultConfig();
-        const parseTimeoutInput = (id, fallback) => {
-            const value = parseInt(document.getElementById(id).value, 10);
-            if (Number.isNaN(value)) {
-                return fallback;
-            }
-            return value;
-        };
 
         // 获取端点值
         let endpointValue;
@@ -283,34 +272,18 @@ class CommentInsightOptions {
             },
             platforms: {
                 youtube: {
-                    apiKey: document.getElementById('youtube-api-key').value.trim(),
-                    extractionTimeoutMs: parseTimeoutInput(
-                        'youtube-extraction-timeout',
-                        this.config?.platforms?.youtube?.extractionTimeoutMs ?? defaultConfig.platforms.youtube?.extractionTimeoutMs ?? 90000
-                    )
+                    apiKey: document.getElementById('youtube-api-key').value.trim()
                 },
                 tiktok: {
-                    mode: document.getElementById('tiktok-mode').value,
-                    extractionTimeoutMs: parseTimeoutInput(
-                        'tiktok-extraction-timeout',
-                        this.config?.platforms?.tiktok?.extractionTimeoutMs ?? defaultConfig.platforms.tiktok?.extractionTimeoutMs ?? 60000
-                    )
+                    mode: document.getElementById('tiktok-mode').value
                 },
                 twitter: {
                     mode: document.getElementById('twitter-mode').value,
                     bearerToken: document.getElementById('twitter-bearer-token').value.trim(),
-                    apiVersion: document.getElementById('twitter-api-version').value,
-                    extractionTimeoutMs: parseTimeoutInput(
-                        'twitter-extraction-timeout',
-                        this.config?.platforms?.twitter?.extractionTimeoutMs ?? defaultConfig.platforms.twitter?.extractionTimeoutMs ?? 60000
-                    )
+                    apiVersion: document.getElementById('twitter-api-version').value
                 },
                 bilibili: {
-                    mode: document.getElementById('bilibili-mode').value,
-                    extractionTimeoutMs: parseTimeoutInput(
-                        'bilibili-extraction-timeout',
-                        this.config?.platforms?.bilibili?.extractionTimeoutMs ?? defaultConfig.platforms.bilibili?.extractionTimeoutMs ?? 120000
-                    )
+                    mode: document.getElementById('bilibili-mode').value
                 },
                 // 公共配置
                 maxComments: parseInt(document.getElementById('platform-max-comments').value),
@@ -372,21 +345,6 @@ class CommentInsightOptions {
             this.showStatus('最大评论数必须在10-1000之间', 'error');
             return false;
         }
-
-        const timeoutValidators = [
-            { value: config.platforms.youtube?.extractionTimeoutMs, min: 10000, max: 300000, label: 'YouTube提取超时' },
-            { value: config.platforms.tiktok?.extractionTimeoutMs, min: 10000, max: 180000, label: 'TikTok提取超时' },
-            { value: config.platforms.twitter?.extractionTimeoutMs, min: 10000, max: 180000, label: 'Twitter提取超时' },
-            { value: config.platforms.bilibili?.extractionTimeoutMs, min: 10000, max: 240000, label: 'Bilibili提取超时' }
-        ];
-
-        for (const { value, min, max, label } of timeoutValidators) {
-            if (typeof value !== 'number' || Number.isNaN(value) || value < min || value > max) {
-                this.showStatus(`${label}必须在${min}-${max}之间`, 'error');
-                return false;
-            }
-        }
-
 
         // 验证自定义端点
         if (document.getElementById('ai-endpoint-select').value === 'custom') {

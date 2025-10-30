@@ -11,33 +11,36 @@ class BaseExtractor {
     /**
      * 等待元素出现
      * @param {string} selector - CSS选择器
-     * @param {number} timeout - 超时时间
      * @returns {Promise<Element>}
      */
-    async waitForElement(selector, timeout = 5000) {
-        return CommonUtils.waitForElement(selector, timeout);
+    async waitForElement(selector) {
+        return CommonUtils.waitForElement(selector);
     }
 
     /**
      * 滚动加载更多内容
      * @param {Element|Window} scrollContainer - 滚动容器
-     * @param {number} maxScrolls - 最大滚动次数
      */
-    async scrollToLoadMore(scrollContainer, maxScrolls = 10) {
-        let scrollCount = 0;
+    async scrollToLoadMore(scrollContainer) {
         let lastHeight = 0;
+        let stableCount = 0;
 
-        while (scrollCount < maxScrolls) {
+        while (true) {
             const container = scrollContainer || window;
             const currentHeight = container === window ?
                 document.documentElement.scrollHeight :
                 container.scrollHeight;
 
             if (currentHeight === lastHeight) {
-                break;
+                stableCount++;
+                if (stableCount >= 3) {
+                    console.log('连续3次高度未变化，停止滚动');
+                    break;
+                }
+            } else {
+                stableCount = 0;
+                lastHeight = currentHeight;
             }
-
-            lastHeight = currentHeight;
 
             if (container === window) {
                 window.scrollTo(0, document.documentElement.scrollHeight);
@@ -46,7 +49,6 @@ class BaseExtractor {
             }
 
             await this.delay(1000);
-            scrollCount++;
         }
     }
 
