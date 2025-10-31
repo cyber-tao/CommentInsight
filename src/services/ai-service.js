@@ -13,6 +13,11 @@ class AIService {
      */
     static async analyzeComments(comments, config, videoTitle = '', videoDescription = '') {
         try {
+            // 空评论数组校验
+            if (!comments || !Array.isArray(comments) || comments.length === 0) {
+                throw new Error('评论数组为空，无法进行分析。请先提取评论数据。');
+            }
+
             console.log('开始分析评论');
 
             const aiConfig = config.ai;
@@ -173,7 +178,7 @@ class AIService {
         let totalTokens = 0;
         const chunkMaxTokens = Math.max(256, Math.floor(normalizedMaxTokens * 0.35));
         
-        // 构建上下文信息
+        // 构建上下文信息（在循环外一次性构建，避免重复计算）
         let contextPrefix = '';
         if (videoTitle) {
             contextPrefix += `**视频标题**: ${videoTitle}\n\n`;
@@ -201,6 +206,7 @@ class AIService {
                 }
             }).join('\n');
             
+            // 复用已构建的上下文信息
             const prompt = `${contextPrefix}以下是第 ${i + 1}/${chunks.length} 批评论（共 ${chunk.length} 条），评论后面的 [👍 数字] 表示点赞数，缩进的"↳ 回复:"表示这是对上方评论的回复。请结合视频主题，特别关注高点赞评论，并分析评论和回复之间的互动关系。请提炼要点，输出小结（要点、情感比例、主题、热门评论与显著现象）：\n\n${chunkText}`;
             
             const data = await this.chatCompletion(aiConfig, [

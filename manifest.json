@@ -3,6 +3,7 @@
   "name": "评论洞察",
   "version": "2.0.0",
   "description": "从社交媒体平台提取评论并进行AI分析，生成洞察摘要和情感分析",
+  "minimum_chrome_version": "88",
   "permissions": [
     "storage",
     "activeTab",
@@ -34,6 +35,9 @@
         "https://b23.tv/*"
       ],
       "js": [
+        "src/utils/logger.js",
+        "src/utils/constants.js",
+        "src/utils/error-handler.js",
         "src/utils/common.js",
         "src/extractors/base-extractor.js",
         "src/extractors/youtube-extractor.js",

@@ -11,10 +11,11 @@ class BaseExtractor {
     /**
      * 等待元素出现
      * @param {string} selector - CSS选择器
+     * @param {number} maxWaitTime - 最大等待时间（毫秒）
      * @returns {Promise<Element>}
      */
-    async waitForElement(selector) {
-        return CommonUtils.waitForElement(selector);
+    async waitForElement(selector, maxWaitTime = 30000) {
+        return CommonUtils.waitForElement(selector, maxWaitTime);
     }
 
     /**
@@ -111,6 +112,186 @@ class BaseExtractor {
     }
 
     /**
+     * 通过多个选择器查找元素
+     * @param {Element} root - 根元素
+     * @param {Array<string>} selectors - 选择器数组
+     * @returns {Element|null}
+     */
+    findElementBySelectors(root, selectors) {
+        for (const selector of selectors) {
+            try {
+                const element = root.querySelector(selector);
+                if (element) {
+                    return element;
+                }
+            } catch (e) {
+                continue;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 从Shadow DOM中查找元素
+     * @param {Element} host - Shadow Host元素
+     * @param {string} selector - CSS选择器
+     * @returns {Element|null}
+     */
+    findInShadowRoot(host, selector) {
+        if (!host || !host.shadowRoot) {
+            return null;
+        }
+        try {
+            return host.shadowRoot.querySelector(selector);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    /**
+     * 从Shadow DOM中查找所有元素
+     * @param {Element} host - Shadow Host元素
+     * @param {string} selector - CSS选择器
+     * @returns {NodeList|Array}
+     */
+    findAllInShadowRoot(host, selector) {
+        if (!host || !host.shadowRoot) {
+            return [];
+        }
+        try {
+            return host.shadowRoot.querySelectorAll(selector);
+        } catch (e) {
+            return [];
+        }
+    }
+
+    /**
+     * 查找并点击按钮（支持多种事件触发方式）
+     * @param {Element} button - 按钮元素
+     * @returns {boolean} - 是否成功点击
+     */
+    clickButton(button) {
+        if (!button) {
+            return false;
+        }
+        try {
+            button.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            button.click();
+            button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            return true;
+        } catch (e) {
+            console.warn('点击按钮失败:', e);
+            return false;
+        }
+    }
+
+    /**
+     * 等待元素数量变化
+     * @param {Function} getCountFn - 获取当前数量的函数
+     * @param {number} previousCount - 之前的数量
+     * @param {number} maxWaitTime - 最大等待时间（毫秒）
+     * @returns {Promise<number>} - 新的数量
+     */
+    async waitForCountChange(getCountFn, previousCount, maxWaitTime = 5000) {
+        const start = Date.now();
+        while (Date.now() - start < maxWaitTime) {
+            const currentCount = getCountFn();
+            if (currentCount !== previousCount) {
+                return currentCount;
+            }
+            await this.delay(200);
+        }
+        return getCountFn();
+    }
+
+    /**
+     * 解析数字文本（支持K、M等单位）
+     * @param {string} text - 数字文本（如 "1.2K", "3M"）
+     * @returns {number}
+     */
+    parseNumberText(text) {
+        return CommonUtils.parseNumber(text);
+    }
+
+    /**
+     * 解析时间文本
+     * @param {string} timeText - 时间文本（如 "2小时前", "3天前"）
+     * @returns {string} - ISO时间戳
+     */
+    parseTimeText(timeText) {
+        return CommonUtils.parseTime(timeText);
+    }
+
+    /**
+     * 提取元素属性值
+     * @param {Element} element - DOM元素
+     * @param {Array<string>} attributes - 属性名数组
+     * @returns {string|null}
+     */
+    extractAttributeValue(element, attributes) {
+        if (!element) {
+            return null;
+        }
+        for (const attr of attributes) {
+            const value = element.getAttribute(attr);
+            if (value) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 通用重试机制
+     * @param {Function} fn - 要重试的异步函数
+     * @param {number} maxRetries - 最大重试次数
+     * @param {number} delayMs - 重试延迟（毫秒）
+     * @returns {Promise<any>}
+     */
+    async retryWithBackoff(fn, maxRetries = this.maxRetries, delayMs = this.retryDelay) {
+        let lastError;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                return await fn();
+            } catch (error) {
+                lastError = error;
+                console.warn(`尝试 ${attempt + 1}/${maxRetries} 失败:`, error.message);
+                if (attempt < maxRetries - 1) {
+                    await this.delay(delayMs * Math.pow(2, attempt));
+                }
+            }
+        }
+        throw lastError;
+    }
+
+    /**
+     * 安全地从元素提取数据
+     * @param {Element} element - DOM元素
+     * @param {Object} config - 提取配置
+     * @returns {Object}
+     */
+    safeExtractData(element, config) {
+        const result = {};
+        
+        for (const [key, selectors] of Object.entries(config)) {
+            try {
+                if (Array.isArray(selectors)) {
+                    result[key] = this.findTextBySelectors(element, selectors);
+                } else if (typeof selectors === 'string') {
+                    const el = element.querySelector(selectors);
+                    result[key] = el ? el.textContent.trim() : null;
+                } else if (typeof selectors === 'function') {
+                    result[key] = selectors(element);
+                }
+            } catch (e) {
+                result[key] = null;
+            }
+        }
+        
+        return result;
+    }
+
+    /**
      * 生成评论唯一ID
      * @param {string} author - 作者
      * @param {string} text - 评论内容
@@ -120,6 +301,25 @@ class BaseExtractor {
     generateCommentId(author, text, timestamp) {
         const content = `${author}_${text}_${timestamp}`;
         return CommonUtils.generateStableId(content);
+    }
+
+    /**
+     * 构建标准评论对象
+     * @param {Object} data - 评论数据
+     * @returns {Object}
+     */
+    buildCommentObject(data) {
+        return {
+            id: data.id || this.generateCommentId(data.author, data.text, data.timestamp),
+            parentId: data.parentId || "0",
+            author: this.sanitizeText(data.author || '匿名用户'),
+            text: this.sanitizeText(data.text || ''),
+            timestamp: data.timestamp || new Date().toISOString(),
+            likes: data.likes || 0,
+            replyCount: data.replyCount || 0,
+            platform: data.platform,
+            url: data.url || window.location.href
+        };
     }
 
     /**
@@ -136,4 +336,3 @@ class BaseExtractor {
 if (typeof window !== 'undefined') {
     window.BaseExtractor = BaseExtractor;
 }
-

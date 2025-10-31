@@ -12,6 +12,16 @@ class CommentExtractor {
             bilibili: new BilibiliExtractor()
         };
 
+        // 清理引用
+        this.heartbeatInterval = null;
+        this.messageListener = null;
+        this.youtubeListeners = {
+            pushState: null,
+            replaceState: null,
+            popstate: null,
+            ytNavigateFinish: null
+        };
+
         this.initializeContentScript();
     }
 
@@ -33,10 +43,11 @@ class CommentExtractor {
 
     initializeContentScript() {
         // 监听来自后台脚本的消息
-        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        this.messageListener = (message, sender, sendResponse) => {
             this.handleMessage(message, sender, sendResponse);
             return true; // 保持异步响应通道开放
-        });
+        };
+        chrome.runtime.onMessage.addListener(this.messageListener);
 
         console.log(`评论洞察扩展已在${this.platform}平台加载`);
 
@@ -45,16 +56,36 @@ class CommentExtractor {
             this.setupYouTubeSPAListener();
         }
 
-        // 心跳检测
-        setInterval(() => {
-            console.log('内容脚本心跳:', this.platform, new Date().toISOString());
-        }, 30000);
+        // 心跳检测（仅在开发环境启用）
+        if (typeof Constants !== 'undefined' && Constants.DELAY) {
+            this.heartbeatInterval = setInterval(() => {
+                console.log('内容脚本心跳:', this.platform, new Date().toISOString());
+            }, Constants.DELAY.HEARTBEAT_INTERVAL);
+        }
+    }
+
+    /**
+     * 清理资源
+     */
+    cleanup() {
+        // 清理心跳定时器
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+        }
+
+        // 清理消息监听器
+        if (this.messageListener) {
+            chrome.runtime.onMessage.removeListener(this.messageListener);
+            this.messageListener = null;
+        }
+
+        // 清理YouTube监听器
+        this.cleanupYouTubeListeners();
     }
 
     setupYouTubeSPAListener() {
         let lastUrl = window.location.href;
-        
-        // 监听History API的变化
         const originalPushState = history.pushState;
         const originalReplaceState = history.replaceState;
         
@@ -75,23 +106,54 @@ class CommentExtractor {
             }
         };
         
-        history.pushState = function(...args) {
+        // 保存原始函数引用以便清理
+        this.youtubeListeners.pushState = function(...args) {
             originalPushState.apply(this, args);
             notifyUrlChange();
         };
-        
-        history.replaceState = function(...args) {
+        this.youtubeListeners.replaceState = function(...args) {
             originalReplaceState.apply(this, args);
             notifyUrlChange();
         };
         
+        history.pushState = this.youtubeListeners.pushState;
+        history.replaceState = this.youtubeListeners.replaceState;
+        
         // 监听popstate事件（浏览器前进后退）
-        window.addEventListener('popstate', notifyUrlChange);
+        this.youtubeListeners.popstate = notifyUrlChange;
+        window.addEventListener('popstate', this.youtubeListeners.popstate);
         
         // 监听YouTube特有的yt-navigate-finish事件
-        document.addEventListener('yt-navigate-finish', notifyUrlChange);
+        this.youtubeListeners.ytNavigateFinish = notifyUrlChange;
+        document.addEventListener('yt-navigate-finish', this.youtubeListeners.ytNavigateFinish);
         
         console.log('YouTube SPA导航监听器已设置');
+    }
+
+    /**
+     * 清理YouTube监听器
+     */
+    cleanupYouTubeListeners() {
+        if (this.youtubeListeners.pushState && history.pushState !== this.youtubeListeners.pushState) {
+            // 如果已被其他代码替换，尝试恢复
+            const currentPushState = history.pushState;
+            history.pushState = currentPushState;
+        }
+        
+        if (this.youtubeListeners.replaceState && history.replaceState !== this.youtubeListeners.replaceState) {
+            const currentReplaceState = history.replaceState;
+            history.replaceState = currentReplaceState;
+        }
+        
+        if (this.youtubeListeners.popstate) {
+            window.removeEventListener('popstate', this.youtubeListeners.popstate);
+            this.youtubeListeners.popstate = null;
+        }
+        
+        if (this.youtubeListeners.ytNavigateFinish) {
+            document.removeEventListener('yt-navigate-finish', this.youtubeListeners.ytNavigateFinish);
+            this.youtubeListeners.ytNavigateFinish = null;
+        }
     }
 
     async handleMessage(message, sender, sendResponse) {

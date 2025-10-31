@@ -218,7 +218,7 @@ class CommonUtils {
     /**
      * 等待DOM元素出现
      * @param {string} selector - CSS选择器
-     * @param {number} maxWaitTime - 最大等待时间（毫秒），0表示无限等待
+     * @param {number} maxWaitTime - 最大等待时间（毫秒），默认30秒，最小1秒
      * @returns {Promise<Element>}
      */
     static waitForElement(selector, maxWaitTime = 30000) {
@@ -228,6 +228,9 @@ class CommonUtils {
                 resolve(element);
                 return;
             }
+
+            // 确保始终设置超时时间，最小1秒，防止永久运行
+            const timeout = Math.max(1000, maxWaitTime || 30000);
 
             const observer = new MutationObserver(() => {
                 const element = document.querySelector(selector);
@@ -243,14 +246,11 @@ class CommonUtils {
                 subtree: true
             });
 
-            // 如果设置了最大等待时间，则在超时后停止观察
-            let timeoutId = null;
-            if (maxWaitTime > 0) {
-                timeoutId = setTimeout(() => {
-                    observer.disconnect();
-                    reject(new Error(`等待元素超时: ${selector} (${maxWaitTime}ms)`));
-                }, maxWaitTime);
-            }
+            // 始终设置超时，防止MutationObserver永久运行
+            const timeoutId = setTimeout(() => {
+                observer.disconnect();
+                reject(new Error(`等待元素超时: ${selector} (${timeout}ms)`));
+            }, timeout);
         });
     }
 }

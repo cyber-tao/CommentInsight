@@ -6,6 +6,56 @@ class BilibiliExtractor extends BaseExtractor {
     constructor() {
         super();
         this.__lastProgressPingAt = 0;
+        // 自适应延迟策略
+        this.adaptiveDelay = {
+            baseDelay: 800,
+            currentDelay: 800,
+            minDelay: 500,
+            maxDelay: 4000,
+            successCount: 0,
+            failureCount: 0
+        };
+    }
+
+    /**
+     * 自适应延迟 - 根据成功/失败自动调整延迟时间
+     * @param {boolean} success - 操作是否成功
+     * @returns {number} - 当前延迟时间
+     */
+    getAdaptiveDelay(success) {
+        if (success) {
+            this.adaptiveDelay.successCount++;
+            this.adaptiveDelay.failureCount = 0;
+            
+            // 连续成功3次，减少延迟
+            if (this.adaptiveDelay.successCount >= 3) {
+                this.adaptiveDelay.currentDelay = Math.max(
+                    this.adaptiveDelay.minDelay,
+                    Math.floor(this.adaptiveDelay.currentDelay * 0.8)
+                );
+                this.adaptiveDelay.successCount = 0;
+            }
+        } else {
+            this.adaptiveDelay.failureCount++;
+            this.adaptiveDelay.successCount = 0;
+            
+            // 失败时增加延迟
+            this.adaptiveDelay.currentDelay = Math.min(
+                this.adaptiveDelay.maxDelay,
+                Math.floor(this.adaptiveDelay.currentDelay * 1.5)
+            );
+        }
+        
+        return this.adaptiveDelay.currentDelay;
+    }
+
+    /**
+     * 重置自适应延迟策略
+     */
+    resetAdaptiveDelay() {
+        this.adaptiveDelay.currentDelay = this.adaptiveDelay.baseDelay;
+        this.adaptiveDelay.successCount = 0;
+        this.adaptiveDelay.failureCount = 0;
     }
 
     pingProgress(stage, payload = {}) {
@@ -148,328 +198,252 @@ class BilibiliExtractor extends BaseExtractor {
             }
 
             // 3. 检查 bili-comments 的 shadowRoot
-            const biliCommentsRoot = biliComments.shadowRoot;
-            if (!biliCommentsRoot) {
+            if (!biliComments.shadowRoot) {
                 console.log('bili-comments 没有 shadowRoot');
                 return await this.fallbackExtractComments();
             }
 
-            console.log('找到 bili-comments shadowRoot');
+            // 4. 从shadowRoot中获取所有评论线程
+            const threads = biliComments.shadowRoot.querySelectorAll('bili-comment-thread-renderer');
+            console.log(`找到 ${threads.length} 个评论线程`);
 
-            // 4. 查找所有评论线程
-            const commentThreads = biliCommentsRoot.querySelectorAll('bili-comment-thread-renderer');
-            console.log(`找到 ${commentThreads.length} 个评论线程`);
-
-            if (commentThreads.length === 0) {
-                console.log('未找到评论线程，尝试替代方法');
-                return await this.fallbackExtractComments();
-            }
-
-            // 获取最大评论数限制
-            const maxComments = this.config?.platforms?.maxComments || 100;
-
-            // 5. 从上到下遍历每个评论线程，提取主评论和回复
-            for (let i = 0; i < commentThreads.length; i++) {
-                if (comments.length >= maxComments) {
-                    console.log(`已达到最大评论数 ${maxComments}，停止提取`);
-                    break;
-                }
-
-                try {
-                    const thread = commentThreads[i];
-                    const threadRoot = thread.shadowRoot;
-                    if (!threadRoot) continue;
-
-                    const commentElement = threadRoot.querySelector('#comment');
-                    if (!commentElement) continue;
-
-                    const commentRoot = commentElement.shadowRoot;
-                    if (!commentRoot) continue;
-
-                    const mainElement = commentRoot.querySelector('#main');
-                    if (!mainElement) continue;
-
-                    // 提取主评论
-                    const comment = this.extractFromMainElement(mainElement, i);
-                    if (comment) {
-                        comments.push(comment);
-                        console.log(`[${comments.length}/${maxComments}] 提取主评论: ${comment.author} - ${comment.text.substring(0, 30)}...`);
-                        this.pingProgress('top-comment', { index: i + 1, total: commentThreads.length, collected: comments.length });
-
-                        // 如果还有配额，展开并提取该评论的回复
-                        if (comments.length < maxComments) {
-                            const expanded = await this.expandAllRepliesForThread(threadRoot);
-                            if (expanded) {
-                                const remaining = maxComments - comments.length;
-                                const replies = this.extractRepliesFromThread(threadRoot, comment.id, remaining);
-                                if (Array.isArray(replies) && replies.length > 0) {
-                                    console.log(`  ↳ 获取到 ${replies.length} 条回复`);
-                                    comments.push(...replies);
-                                    this.pingProgress('replies', { index: i + 1, replies: replies.length, totalCollected: comments.length });
-                                }
-                            }
-                        }
-                        
-                        // 在每条主评之间加入轻量随机节流，避免触发风控
-                        await this.delay(600 + Math.floor(Math.random() * 700));
-                    }
-                } catch (error) {
-                    console.warn(`提取第${i + 1}条评论失败:`, error.message);
+            // 5. 逐个处理评论线程
+            for (const thread of threads) {
+                const topComment = await this.extractTopLevelComment(thread);
+                if (topComment) {
+                    comments.push(topComment);
+                    
+                    // 展开回复后提取
+                    await this.expandAllRepliesForThread(thread);
+                    const replies = this.extractRepliesFromThread(thread, topComment.id, this.config?.platforms?.maxComments || 100);
+                    comments.push(...replies);
                 }
             }
+
+            console.log(`从Shadow DOM成功提取 ${comments.length} 条评论`);
+            return comments;
 
         } catch (error) {
-            console.error('Shadow DOM 评论提取失败:', error);
+            console.error('Shadow DOM提取失败，尝试使用fallback方法:', error);
             return await this.fallbackExtractComments();
         }
-
-        console.log(`Shadow DOM 提取完成，共 ${comments.length} 条评论（含回复）`);
-        return comments;
     }
 
-    async expandAllRepliesForThread(threadRoot) {
-		try {
-			// replies 容器在 threadRoot 内，但“点击查看”在 bili-comment-replies-renderer 的 shadowRoot
-			const repliesComponent = threadRoot.querySelector('bili-comment-replies-renderer');
-			if (!repliesComponent || !repliesComponent.shadowRoot) {
-				console.log('[Bili] 未找到 bili-comment-replies-renderer 或其 shadowRoot');
-				return false;
-			}
-			const repRoot = repliesComponent.shadowRoot;
-
-			// 统计初始已渲染的回复条数
-			const getLoadedCount = () => repRoot.querySelectorAll('bili-comment-reply-renderer').length;
-			let loadedBefore = getLoadedCount();
-
-			// 尝试解析期望回复数（如果仍有“共X条回复”提示）
-			let expectedFromLabel = null;
-			const viewMoreAtStart = repRoot.querySelector('#view-more');
-			if (viewMoreAtStart) {
-				const m = /共\s*(\d+)\s*条回复/.exec((viewMoreAtStart.textContent || '').trim());
-				if (m) expectedFromLabel = parseInt(m[1], 10);
-			}
-
-			const getClickTargets = () => {
-				const targets = new Set();
-				// 仅根据DOM结构和ID查找
-				const vm = repRoot.querySelector('#view-more');
-				if (vm) {
-					// 优先 bili-text-button 内部按钮
-					const host = vm.querySelector('bili-text-button');
-					if (host && host.shadowRoot) {
-						const inner = host.shadowRoot.querySelector('button');
-						if (inner) targets.add(inner);
-					}
-					// 兜底：普通 button
-					vm.querySelectorAll('button').forEach(b => targets.add(b));
-				}
-				return Array.from(targets);
-			};
-
-			const robustClick = (el) => {
-				try { el.scrollIntoView({ block: 'center' }); } catch {}
-				try { el.click(); } catch {}
-				try { el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true })); } catch {}
-				try { el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, composed: true })); } catch {}
-				try { el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, composed: true })); } catch {}
-				try { el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, composed: true })); } catch {}
-				try { el.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true })); } catch {}
-			};
-
-			// 逐个点击 + 等待加载完成 + 指数退避，降低触发 412 风控概率
-			const waitForIncrease = async (prev, maxWaitTime = 4500) => {
-				const start = Date.now();
-				while (Date.now() - start < maxWaitTime) {
-					const cur = getLoadedCount();
-					if (cur > prev) return cur;
-					await this.delay(200);
-				}
-				return getLoadedCount();
-			};
-
-			let totalClicks = 0;
-			let backoff = 800;
-			let attempt = 0;
-			while (true) {
-				const btns = getClickTargets();
-				if (!btns.length) break;
-				const b = btns[0];
-				const label = (b.textContent || '').trim();
-				const before = getLoadedCount();
-				console.log(`[Bili] 展开回复(尝试${attempt + 1})：点击 "${label}"`);
-				robustClick(b);
-				const after = await waitForIncrease(before, 4500);
-				if (after > before) {
-					totalClicks++;
-					backoff = 800; // 成功后重置退避
-				} else {
-					// 未增加，指数退避并重试
-					await this.delay(backoff + Math.floor(Math.random() * 600));
-					backoff = Math.min(Math.floor(backoff * 1.5), 4000);
-				}
-
-				// 如果已达到期望数量则提前结束
-				if (expectedFromLabel && after >= expectedFromLabel) break;
-				
-				attempt++;
-			}
-
-			const loadedAfter = getLoadedCount();
-			console.log(`[Bili] 回复展开完成：预期=${expectedFromLabel ?? '未知'}，新增=${loadedAfter - loadedBefore}，当前已渲染=${loadedAfter}，点击次数=${totalClicks}`);
-
-			return loadedAfter > loadedBefore;
-		} catch (e) {
-			console.warn('展开B站回复失败:', e);
-			return false;
-		}
-    }
-
-    extractRepliesFromThread(threadRoot, parentId, maxCount = Infinity) {
-        const results = [];
+    async extractTopLevelComment(threadRoot) {
         try {
-            const repliesComponent = threadRoot.querySelector('bili-comment-replies-renderer');
-            if (!repliesComponent || !repliesComponent.shadowRoot) return results;
-            const repliesRoot = repliesComponent.shadowRoot;
-
-            // 每条回复
-            const replyItems = repliesRoot.querySelectorAll('bili-comment-reply-renderer');
-            console.log(`[Bili] 解析到回复条目: ${replyItems.length}，最多提取: ${maxCount}`);
-            
-            for (let i = 0; i < replyItems.length && results.length < maxCount; i++) {
-                const reply = replyItems[i];
-                const replyRoot = reply.shadowRoot || reply;
-                const main = replyRoot.querySelector('#body #main') || replyRoot.querySelector('#main');
-                if (!main) continue;
-
-                // 作者
-                let author = '匿名用户';
-                const userInfo = main.querySelector('bili-comment-user-info');
-                if (userInfo && userInfo.shadowRoot) {
-                    const nameA = userInfo.shadowRoot.querySelector('#user-name a');
-                    if (nameA && nameA.textContent) author = nameA.textContent.trim();
-                }
-
-                // 内容
-                let content = '';
-                const rich = main.querySelector('bili-rich-text');
-                if (rich && rich.shadowRoot) {
-                    const contents = rich.shadowRoot.querySelector('#contents');
-                    if (contents) {
-                        const spans = contents.querySelectorAll('span');
-                        content = spans.length > 0
-                            ? Array.from(spans).map(s => s.textContent.trim()).join(' ')
-                            : (contents.textContent || '').trim();
-                    }
-                }
-
-                if (!content || content.length < 1) continue;
-
-                // 时间
-                let timeText = '';
-                const action = replyRoot.querySelector('bili-comment-action-buttons-renderer');
-                if (action && action.shadowRoot) {
-                    const pub = action.shadowRoot.querySelector('#pubdate');
-                    if (pub) timeText = pub.textContent.trim();
-                }
-
-                // 点赞
-                let likesText = '';
-                if (action && action.shadowRoot) {
-                    const likeCount = action.shadowRoot.querySelector('#like #count');
-                    if (likeCount) likesText = likeCount.textContent.trim();
-                }
-
-                const timestamp = CommonUtils.parseTime(timeText);
-                const likes = CommonUtils.parseNumber(likesText);
-                const id = this.generateCommentId(author, content, timestamp);
-                results.push({
-                    id,
-                    parentId: parentId,
-                    author: this.sanitizeText(author),
-                    text: this.sanitizeText(content),
-                    timestamp,
-                    likes,
-                    platform: 'bilibili',
-                    url: window.location.href
-                });
+            // 首先检查threadRoot是否有shadowRoot
+            if (!threadRoot.shadowRoot) {
+                console.log('[Bili] threadRoot没有shadowRoot');
+                return null;
             }
-            console.log(`[Bili] 已组装回复: ${results.length}`);
-        } catch (e) {
-            console.warn('提取B站回复失败:', e);
-        }
-        return results;
-    }
-    extractFromMainElement(mainElement, index) {
-        try {
-            console.log(`开始从 #main 元素提取第${index + 1}条评论...`);
 
-            // 提取用户名
+            const threadShadow = threadRoot.shadowRoot;
+            
+            // 尝试多种可能的选择器（在shadowRoot中查找）
+            const possibleSelectors = [
+                'bili-comment-renderer',
+                '#comment',  // 根据源码，主评论有id="comment"
+                'bili-comment',
+                '[class*="comment-renderer"]'
+            ];
+            
+            let mainRenderer = null;
+            for (const selector of possibleSelectors) {
+                mainRenderer = threadShadow.querySelector(selector);
+                if (mainRenderer) {
+                    console.log(`[Bili] 在threadRoot.shadowRoot中找到主评论元素: ${selector}`);
+                    break;
+                }
+            }
+            
+            if (!mainRenderer) {
+                console.log('[Bili] 在threadRoot.shadowRoot中未找到任何主评论元素');
+                return null;
+            }
+
+            // 获取主评论的shadowRoot
+            const commentShadow = mainRenderer.shadowRoot;
+            if (!commentShadow) {
+                console.log('[Bili] 主评论元素没有 shadowRoot，尝试直接提取');
+                return this.extractFromElement(mainRenderer, "0");
+            }
+
+            // 从主评论的shadowRoot提取数据
+            return this.extractFromShadowRoot(commentShadow, "0");
+
+        } catch (error) {
+            console.warn('[Bili] 提取主评论失败:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 从Shadow Root提取评论数据
+     * @param {ShadowRoot} shadowRoot - Shadow Root
+     * @param {string} parentId - 父评论ID
+     * @returns {Object|null} - 评论对象
+     */
+    extractFromShadowRoot(shadowRoot, parentId) {
+        try {
+            // 从shadowRoot获取内容
+            const main = shadowRoot.querySelector('#body #main') || 
+                         shadowRoot.querySelector('#main') ||
+                         shadowRoot.querySelector('[id*="main"]');
+            
+            if (!main) {
+                console.log('[Bili] 未找到评论主体');
+                return null;
+            }
+
+            return this.extractCommentData(main, parentId);
+        } catch (error) {
+            console.warn('[Bili] 从shadowRoot提取失败:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 从普通元素提取评论数据
+     * @param {Element} element - 元素
+     * @param {string} parentId - 父评论ID
+     * @returns {Object|null} - 评论对象
+     */
+    extractFromElement(element, parentId) {
+        try {
+            // 尝试直接从元素提取
+            return this.extractCommentData(element, parentId);
+        } catch (error) {
+            console.warn('[Bili] 从element提取失败:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 提取评论数据的通用方法
+     * @param {Element} container - 包含评论数据的容器元素
+     * @param {string} parentId - 父评论ID
+     * @returns {Object|null} - 评论对象
+     */
+    extractCommentData(container, parentId) {
+        try {
+            // 提取作者信息
             let author = '匿名用户';
-            const userInfoElement = mainElement.querySelector('bili-comment-user-info');
-            if (userInfoElement && userInfoElement.shadowRoot) {
-                const userNameElement = userInfoElement.shadowRoot.querySelector('#user-name a');
-                if (userNameElement) {
-                    author = userNameElement.textContent.trim();
+            const userInfoSelectors = [
+                'bili-comment-user-info',
+                '[class*="user-info"]',
+                '[class*="user-name"]'
+            ];
+            
+            for (const selector of userInfoSelectors) {
+                const userInfo = container.querySelector(selector);
+                if (userInfo) {
+                    if (userInfo.shadowRoot) {
+                        const nameA = userInfo.shadowRoot.querySelector('#user-name a') ||
+                                     userInfo.shadowRoot.querySelector('a') ||
+                                     userInfo.shadowRoot.querySelector('[class*="name"]');
+                        if (nameA && nameA.textContent) {
+                            author = nameA.textContent.trim();
+                            break;
+                        }
+                    } else {
+                        // 直接从元素提取
+                        const nameEl = userInfo.querySelector('a') || userInfo;
+                        if (nameEl && nameEl.textContent) {
+                            author = nameEl.textContent.trim();
+                            break;
+                        }
+                    }
                 }
             }
 
             // 提取评论内容
             let content = '';
-            const richTextElement = mainElement.querySelector('bili-rich-text');
-            if (richTextElement && richTextElement.shadowRoot) {
-                const contentsElement = richTextElement.shadowRoot.querySelector('#contents');
-                if (contentsElement) {
-                    const spans = contentsElement.querySelectorAll('span');
-                    if (spans.length > 0) {
-                        content = Array.from(spans).map(span => span.textContent.trim()).join(' ');
+            const richTextSelectors = [
+                'bili-rich-text',
+                '[class*="rich-text"]',
+                '[class*="comment-text"]',
+                '[class*="text-con"]'
+            ];
+            
+            for (const selector of richTextSelectors) {
+                const richText = container.querySelector(selector);
+                if (richText) {
+                    if (richText.shadowRoot) {
+                        const contents = richText.shadowRoot.querySelector('#contents') ||
+                                        richText.shadowRoot.querySelector('[id*="content"]');
+                        if (contents) {
+                            const spans = contents.querySelectorAll('span');
+                            if (spans.length > 0) {
+                                content = Array.from(spans).map(s => s.textContent.trim()).join(' ');
+                            } else {
+                                content = (contents.textContent || '').trim();
+                            }
+                            break;
+                        }
                     } else {
-                        content = contentsElement.textContent.trim();
+                        // 直接从元素提取
+                        content = (richText.textContent || '').trim();
+                        break;
                     }
                 }
             }
 
-            // 提取时间
+            if (!content || content.length < 1) {
+                console.log('[Bili] 评论内容为空');
+                return null;
+            }
+
+            // 提取时间和点赞信息
             let timeText = '';
-            const actionButtonsElement = mainElement.querySelector('bili-comment-action-buttons-renderer');
-            if (actionButtonsElement && actionButtonsElement.shadowRoot) {
-                const pubdateElement = actionButtonsElement.shadowRoot.querySelector('#pubdate');
-                if (pubdateElement) {
-                    timeText = pubdateElement.textContent.trim();
-                }
-            }
-
-            // 提取点赞数
             let likesText = '';
-            if (actionButtonsElement && actionButtonsElement.shadowRoot) {
-                const likeCountElement = actionButtonsElement.shadowRoot.querySelector('#like #count');
-                if (likeCountElement) {
-                    likesText = likeCountElement.textContent.trim();
-                }
-            }
-
-            // 验证评论内容
-            if (!content || content.length < 2) {
-                return null;
-            }
-
-            // 过滤明显过短的内容（通常是UI元素文本）
-            // 不再依赖文字关键词，而是基于长度判断
-            if (content.length < 2) {
-                return null;
-            }
             
-            // 过滤纯数字时间格式（如"30秒"、"5分钟"）
-            if (/^\d+[秒分钟小时天周月年]$/.test(content.trim())) {
-                return null;
+            const actionSelectors = [
+                'bili-comment-action-buttons-renderer',
+                '[class*="action"]',
+                '[class*="toolbar"]'
+            ];
+            
+            for (const selector of actionSelectors) {
+                const actionButtons = container.querySelector(selector);
+                if (actionButtons) {
+                    if (actionButtons.shadowRoot) {
+                        const pubdate = actionButtons.shadowRoot.querySelector('#pubdate') ||
+                                       actionButtons.shadowRoot.querySelector('[class*="time"]');
+                        if (pubdate) {
+                            timeText = pubdate.textContent.trim();
+                        }
+                        
+                        const likeCount = actionButtons.shadowRoot.querySelector('#like #count') ||
+                                         actionButtons.shadowRoot.querySelector('[class*="like"] [class*="count"]');
+                        if (likeCount) {
+                            likesText = likeCount.textContent.trim();
+                        }
+                        break;
+                    } else {
+                        // 直接从元素提取
+                        const pubdate = actionButtons.querySelector('[class*="time"]');
+                        if (pubdate) {
+                            timeText = pubdate.textContent.trim();
+                        }
+                        
+                        const likeCount = actionButtons.querySelector('[class*="like"]');
+                        if (likeCount) {
+                            likesText = likeCount.textContent.trim();
+                        }
+                        break;
+                    }
+                }
             }
 
             const timestamp = CommonUtils.parseTime(timeText);
             const likes = CommonUtils.parseNumber(likesText);
             const id = this.generateCommentId(author, content, timestamp);
 
+            console.log(`[Bili] 成功提取评论: author=${author}, content=${content.substring(0, 30)}...`);
+
             return {
                 id,
-                parentId: "0",
+                parentId: parentId,
                 author: this.sanitizeText(author),
                 text: this.sanitizeText(content),
                 timestamp,
@@ -479,95 +453,323 @@ class BilibiliExtractor extends BaseExtractor {
             };
 
         } catch (error) {
-            console.error(`从 #main 元素提取评论失败:`, error);
+            console.warn('[Bili] 提取评论数据失败:', error);
             return null;
         }
+    }
+
+    /**
+     * 获取预期回复数量（从UI标签解析）
+     * @param {Element} threadRoot - 评论线程根元素
+     * @returns {number|null} - 预期回复数，无法获取时返回null
+     */
+    getExpectedReplyCount(threadRoot) {
+        try {
+            // 先获取threadRoot的shadowRoot
+            if (!threadRoot.shadowRoot) return null;
+            const threadShadow = threadRoot.shadowRoot;
+            
+            // 在shadowRoot中查找replies容器
+            const repliesDiv = threadShadow.querySelector('#replies') || 
+                              threadShadow.querySelector('[id*="repli"]');
+            if (!repliesDiv) return null;
+            
+            const repComp = repliesDiv.querySelector('bili-comment-replies-renderer');
+            if (!repComp || !repComp.shadowRoot) return null;
+            
+            const repRoot = repComp.shadowRoot;
+            const vm = repRoot.querySelector('#view-more');
+            if (!vm) return null;
+            
+            const label = vm.textContent || '';
+            const match = label.match(/(\d+)/);
+            return match ? parseInt(match[1], 10) : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    /**
+     * 获取当前已加载的回复数量
+     * @param {Element} threadRoot - 评论线程根元素
+     * @returns {number} - 已加载回复数
+     */
+    getLoadedReplyCount(threadRoot) {
+        try {
+            // 先获取threadRoot的shadowRoot
+            if (!threadRoot.shadowRoot) return 0;
+            const threadShadow = threadRoot.shadowRoot;
+            
+            // 在shadowRoot中查找replies容器
+            const repliesDiv = threadShadow.querySelector('#replies') || 
+                              threadShadow.querySelector('[id*="repli"]');
+            if (!repliesDiv) return 0;
+            
+            const repComp = repliesDiv.querySelector('bili-comment-replies-renderer');
+            if (!repComp || !repComp.shadowRoot) return 0;
+            
+            const replies = repComp.shadowRoot.querySelectorAll('bili-comment-reply-renderer');
+            return replies.length;
+        } catch (e) {
+            return 0;
+        }
+    }
+
+    /**
+     * 查找"查看更多回复"按钮
+     * @param {Element} threadRoot - 评论线程根元素
+     * @returns {Element[]} - 可点击的按钮元素数组
+     */
+    findViewMoreButtons(threadRoot) {
+        const targets = new Set();
+        try {
+            // 先获取threadRoot的shadowRoot
+            if (!threadRoot.shadowRoot) return [];
+            const threadShadow = threadRoot.shadowRoot;
+            
+            // 在shadowRoot中查找replies容器
+            const repliesDiv = threadShadow.querySelector('#replies') || 
+                              threadShadow.querySelector('[id*="repli"]');
+            if (!repliesDiv) return [];
+            
+            const repComp = repliesDiv.querySelector('bili-comment-replies-renderer');
+            if (!repComp || !repComp.shadowRoot) return [];
+            
+            const repRoot = repComp.shadowRoot;
+            const vm = repRoot.querySelector('#view-more');
+            if (!vm) return [];
+            
+            // 优先查找 bili-text-button 内部按钮
+            const host = vm.querySelector('bili-text-button');
+            if (host && host.shadowRoot) {
+                const inner = host.shadowRoot.querySelector('button');
+                if (inner) targets.add(inner);
+            }
+            
+            // 兜底：查找普通 button
+            vm.querySelectorAll('button').forEach(b => targets.add(b));
+        } catch (e) {
+            console.warn('[Bili] 查找查看更多按钮失败:', e);
+        }
+        return Array.from(targets);
+    }
+
+    /**
+     * 强制点击元素（尝试多种事件触发方式）
+     * @param {Element} element - 要点击的元素
+     */
+    robustClickElement(element) {
+        try { element.scrollIntoView({ block: 'center' }); } catch {}
+        try { element.click(); } catch {}
+        try { element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true })); } catch {}
+        try { element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, composed: true })); } catch {}
+        try { element.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, composed: true })); } catch {}
+        try { element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, composed: true })); } catch {}
+        try { element.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true })); } catch {}
+    }
+
+    /**
+     * 等待回复数量增加
+     * @param {Element} threadRoot - 评论线程根元素
+     * @param {number} previousCount - 之前的回复数
+     * @param {number} maxWaitTime - 最大等待时间（毫秒）
+     * @returns {Promise<number>} - 新的回复数
+     */
+    async waitForReplyIncrease(threadRoot, previousCount, maxWaitTime = 4500) {
+        const start = Date.now();
+        while (Date.now() - start < maxWaitTime) {
+            const currentCount = this.getLoadedReplyCount(threadRoot);
+            if (currentCount > previousCount) {
+                return currentCount;
+            }
+            await this.delay(200);
+        }
+        return this.getLoadedReplyCount(threadRoot);
+    }
+
+    /**
+     * 展开评论的所有回复（重构后的主方法，使用自适应延迟）
+     * @param {Element} threadRoot - 评论线程根元素
+     * @returns {Promise<boolean>} - 是否成功展开了新回复
+     */
+    async expandAllRepliesForThread(threadRoot) {
+        try {
+            const expectedCount = this.getExpectedReplyCount(threadRoot);
+            const loadedBefore = this.getLoadedReplyCount(threadRoot);
+            
+            console.log(`[Bili] 开始展开回复：预期=${expectedCount ?? '未知'}，当前已渲染=${loadedBefore}`);
+            
+            if (loadedBefore === 0) {
+                console.log('[Bili] 没有回复可展开');
+                return false;
+            }
+
+            // 重置自适应延迟策略
+            this.resetAdaptiveDelay();
+            
+            let totalClicks = 0;
+            let attempt = 0;
+            let currentCount = loadedBefore;
+
+            // 循环点击"查看更多"按钮直到没有更多按钮
+            while (true) {
+                const buttons = this.findViewMoreButtons(threadRoot);
+                if (!buttons.length) {
+                    console.log('[Bili] 没有更多"查看更多"按钮');
+                    break;
+                }
+                
+                const button = buttons[0];
+                const buttonLabel = (button.textContent || '').trim();
+                const beforeClick = currentCount;
+                
+                console.log(`[Bili] 展开回复(尝试${attempt + 1})：点击 "${buttonLabel}"，当前延迟=${this.adaptiveDelay.currentDelay}ms`);
+                this.robustClickElement(button);
+                
+                const afterClick = await this.waitForReplyIncrease(threadRoot, beforeClick, 4500);
+                
+                if (afterClick > beforeClick) {
+                    // 成功加载新回复
+                    totalClicks++;
+                    currentCount = afterClick;
+                    const delay = this.getAdaptiveDelay(true);
+                    console.log(`[Bili] 成功加载新回复：${afterClick - beforeClick}条，当前总数：${currentCount}，下次延迟：${delay}ms`);
+                } else {
+                    // 未检测到新回复，增加延迟
+                    const delay = this.getAdaptiveDelay(false);
+                    console.log(`[Bili] 未检测到新回复，增加延迟到 ${delay}ms`);
+                    // 添加随机抖动避免被检测
+                    await this.delay(delay + Math.floor(Math.random() * 600));
+                }
+
+                // 如果已达到预期数量则提前结束
+                if (expectedCount && currentCount >= expectedCount) {
+                    console.log(`[Bili] 已达到预期回复数量：${expectedCount}`);
+                    break;
+                }
+                
+                attempt++;
+                
+                // 防止无限循环
+                if (attempt > 50) {
+                    console.log('[Bili] 达到最大尝试次数，停止展开');
+                    break;
+                }
+            }
+
+            const loadedAfter = this.getLoadedReplyCount(threadRoot);
+            const newReplies = loadedAfter - loadedBefore;
+            
+            console.log(`[Bili] 回复展开完成：预期=${expectedCount ?? '未知'}，新增=${newReplies}，当前已渲染=${loadedAfter}，点击次数=${totalClicks}`);
+
+            return newReplies > 0;
+        } catch (e) {
+            console.warn('[Bili] 展开回复失败:', e);
+            return false;
+        }
+    }
+
+    extractRepliesFromThread(threadRoot, parentId, maxCount = Infinity) {
+        const results = [];
+        try {
+            // 先获取threadRoot的shadowRoot
+            if (!threadRoot.shadowRoot) {
+                console.log('[Bili] threadRoot没有shadowRoot，无法提取回复');
+                return results;
+            }
+            const threadShadow = threadRoot.shadowRoot;
+            
+            // 在shadowRoot中查找replies容器
+            const repliesDiv = threadShadow.querySelector('#replies') || 
+                              threadShadow.querySelector('[id*="repli"]');
+            if (!repliesDiv) {
+                console.log('[Bili] 未找到replies容器');
+                return results;
+            }
+            
+            const repliesComponent = repliesDiv.querySelector('bili-comment-replies-renderer');
+            if (!repliesComponent || !repliesComponent.shadowRoot) {
+                console.log('[Bili] 未找到bili-comment-replies-renderer或其shadowRoot');
+                return results;
+            }
+            
+            const repliesRoot = repliesComponent.shadowRoot;
+
+            // 每条回复
+            const replyItems = repliesRoot.querySelectorAll('bili-comment-reply-renderer');
+            console.log(`[Bili] 解析到回复条目: ${replyItems.length}，最多提取: ${maxCount}`);
+            
+            for (let i = 0; i < replyItems.length && results.length < maxCount; i++) {
+                const reply = replyItems[i];
+                const replyRoot = reply.shadowRoot;
+                
+                if (!replyRoot) {
+                    console.log(`[Bili] 回复${i}没有shadowRoot`);
+                    continue;
+                }
+                
+                const main = replyRoot.querySelector('#body #main') || 
+                            replyRoot.querySelector('#main') ||
+                            replyRoot.querySelector('#body');
+                            
+                if (!main) {
+                    console.log(`[Bili] 回复${i}未找到main容器`);
+                    continue;
+                }
+
+                // 使用通用的extractCommentData方法提取回复数据
+                const replyData = this.extractCommentData(main, parentId);
+                if (replyData) {
+                    results.push(replyData);
+                }
+            }
+            
+            console.log(`[Bili] 已组装回复: ${results.length}`);
+        } catch (e) {
+            console.warn('[Bili] 提取回复失败:', e);
+        }
+        return results;
     }
 
     async fallbackExtractComments() {
-        console.log('尝试传统方法提取评论...');
+        console.log('使用fallback方法提取Bilibili评论（限制50条）');
         const comments = [];
+        const maxComments = 50;
 
-        const commentSelectors = [
-            '.reply-item',
-            '.comment-item',
-            '.list-item.reply-item',
-            '.list-item'
-        ];
+        try {
+            // 尝试从DOM提取评论（不依赖Shadow DOM）
+            const commentItems = document.querySelectorAll('.reply-item, .comment-item, [class*="comment"]');
+            
+            for (const item of commentItems) {
+                if (comments.length >= maxComments) break;
 
-        let commentElements = [];
-        let usedSelector = null;
+                const author = item.querySelector('.user-name, [class*="user-name"]')?.textContent?.trim() || '匿名用户';
+                const content = item.querySelector('.text-con, [class*="text-con"]')?.textContent?.trim() || '';
+                const timeText = item.querySelector('.time, [class*="time"]')?.textContent?.trim() || '';
+                const likesText = item.querySelector('.like, [class*="like"]')?.textContent?.trim() || '0';
 
-        for (const selector of commentSelectors) {
-            try {
-                commentElements = document.querySelectorAll(selector);
-                if (commentElements.length > 0) {
-                    console.log(`传统方法使用选择器: ${selector}, 找到评论: ${commentElements.length}条`);
-                    usedSelector = selector;
-                    break;
+                if (content && content.length > 0) {
+                    const timestamp = CommonUtils.parseTime(timeText);
+                    const likes = CommonUtils.parseNumber(likesText);
+                    const id = this.generateCommentId(author, content, timestamp);
+
+                    comments.push({
+                        id,
+                        parentId: "0",
+                        author: this.sanitizeText(author),
+                        text: this.sanitizeText(content),
+                        timestamp,
+                        likes,
+                        platform: 'bilibili',
+                        url: window.location.href
+                    });
                 }
-            } catch (e) {
-                continue;
             }
+        } catch (error) {
+            console.error('fallback提取失败:', error);
         }
 
-        if (commentElements.length === 0) {
-            console.warn('传统方法也找不到评论元素');
-            return comments;
-        }
-
-        for (let i = 0; i < Math.min(commentElements.length, 50); i++) {
-            try {
-                const element = commentElements[i];
-                const comment = this.extractSingleComment(element);
-                if (comment) {
-                    comments.push(comment);
-                }
-            } catch (error) {
-                console.warn(`传统方法提取第${i + 1}条评论失败:`, error.message);
-            }
-        }
-
-        console.log(`传统方法成功提取 ${comments.length} 条有效评论`);
+        console.log(`fallback方法提取了 ${comments.length} 条评论`);
         return comments;
     }
-
-    extractSingleComment(element) {
-        const extractors = {
-            author: ['.user-name', '.uname', '.user-info .name'],
-            content: ['.reply-content', '.comment-content', '.content'],
-            time: ['.reply-time', '.time', '.pub-time'],
-            likes: ['.like-num', '.reply-btn .num', '.up-num']
-        };
-
-        const author = this.findTextBySelectors(element, extractors.author) || '匿名用户';
-        const text = this.findTextBySelectors(element, extractors.content);
-        const timeText = this.findTextBySelectors(element, extractors.time);
-        const likesText = this.findTextBySelectors(element, extractors.likes);
-
-        if (!text || text.trim().length < 2) {
-            return null;
-        }
-
-        const timestamp = CommonUtils.parseTime(timeText);
-        const likes = CommonUtils.parseNumber(likesText);
-        const id = this.generateCommentId(author, text, timestamp);
-
-        return {
-            id,
-            parentId: "0",
-            author: this.sanitizeText(author),
-            text: this.sanitizeText(text),
-            timestamp,
-            likes,
-            platform: 'bilibili',
-            url: window.location.href
-        };
-    }
 }
-
-// 导出
-if (typeof window !== 'undefined') {
-    window.BilibiliExtractor = BilibiliExtractor;
-}
-

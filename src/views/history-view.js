@@ -3,15 +3,30 @@
  */
 
 class HistoryView extends BaseView {
+    constructor(viewer) {
+        super(viewer);
+        // 分页配置
+        this.pagination = {
+            currentPage: 1,
+            itemsPerPage: 20,
+            totalPages: 1,
+            totalItems: 0
+        };
+        // 加载状态
+        this.isLoading = false;
+    }
+
     /**
      * 初始化事件监听
      */
     initializeEvents() {
         document.getElementById('search-history').addEventListener('input', () => {
+            this.pagination.currentPage = 1;
             this.render();
         });
 
         document.getElementById('filter-platform').addEventListener('change', () => {
+            this.pagination.currentPage = 1;
             this.render();
         });
 
@@ -21,7 +36,7 @@ class HistoryView extends BaseView {
     }
 
     /**
-     * 渲染历史记录
+     * 渲染历史记录（支持分页）
      */
     async render() {
         const container = document.getElementById('history-container');
@@ -31,21 +46,200 @@ class HistoryView extends BaseView {
             return;
         }
 
-        const searchTerm = document.getElementById('search-history').value.toLowerCase();
-        const platformFilter = document.getElementById('filter-platform').value;
+        if (this.isLoading) {
+            return;
+        }
 
-        let filteredHistory = this.viewer.currentData.history.filter(item => {
-            const matchesSearch = !searchTerm || 
-                item.title.toLowerCase().includes(searchTerm) ||
-                item.platform.toLowerCase().includes(searchTerm);
-            
-            const matchesPlatform = !platformFilter || item.platform === platformFilter;
-            
-            return matchesSearch && matchesPlatform;
-        });
+        this.isLoading = true;
 
-        container.innerHTML = filteredHistory.map(item => this.createHistoryCard(item)).join('');
-        this.attachHistoryButtonEvents();
+        try {
+            const searchTerm = document.getElementById('search-history').value.toLowerCase();
+            const platformFilter = document.getElementById('filter-platform').value;
+
+            // 过滤历史记录
+            let filteredHistory = this.viewer.currentData.history.filter(item => {
+                const matchesSearch = !searchTerm || 
+                    item.title.toLowerCase().includes(searchTerm) ||
+                    item.platform.toLowerCase().includes(searchTerm);
+                
+                const matchesPlatform = !platformFilter || item.platform === platformFilter;
+                
+                return matchesSearch && matchesPlatform;
+            });
+
+            // 更新分页信息
+            this.pagination.totalItems = filteredHistory.length;
+            this.pagination.totalPages = Math.ceil(filteredHistory.length / this.pagination.itemsPerPage);
+            
+            // 确保当前页在有效范围内
+            this.pagination.currentPage = Math.max(1, Math.min(this.pagination.currentPage, this.pagination.totalPages));
+
+            // 计算当前页的数据范围
+            const startIndex = (this.pagination.currentPage - 1) * this.pagination.itemsPerPage;
+            const endIndex = startIndex + this.pagination.itemsPerPage;
+            const pageData = filteredHistory.slice(startIndex, endIndex);
+
+            // 渲染历史记录卡片
+            container.innerHTML = pageData.map(item => this.createHistoryCard(item)).join('');
+            
+            // 渲染分页控件
+            this.renderPagination();
+            
+            // 附加事件监听器
+            this.attachHistoryButtonEvents();
+        } finally {
+            this.isLoading = false;
+        }
+    }
+
+    /**
+     * 渲染分页控件
+     */
+    renderPagination() {
+        const paginationContainer = document.getElementById('history-pagination');
+        if (!paginationContainer) {
+            // 如果分页容器不存在，创建一个
+            const container = document.getElementById('history-container');
+            const pagination = document.createElement('div');
+            pagination.id = 'history-pagination';
+            pagination.className = 'mt-6 flex items-center justify-between border-t border-gray-200 pt-6';
+            container.parentElement.appendChild(pagination);
+        }
+
+        const { currentPage, totalPages, totalItems, itemsPerPage } = this.pagination;
+
+        if (totalPages <= 1) {
+            document.getElementById('history-pagination').innerHTML = '';
+            return;
+        }
+
+        const startItem = (currentPage - 1) * itemsPerPage + 1;
+        const endItem = Math.min(currentPage * itemsPerPage, totalItems);
+
+        let paginationHTML = `
+            <div class="flex-1 flex justify-between sm:hidden">
+                <button
+                    onclick="historyView.goToPage(${currentPage - 1})"
+                    ${currentPage === 1 ? 'disabled' : ''}
+                    class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    上一页
+                </button>
+                <button
+                    onclick="historyView.goToPage(${currentPage + 1})"
+                    ${currentPage === totalPages ? 'disabled' : ''}
+                    class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    下一页
+                </button>
+            </div>
+            <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                <div>
+                    <p class="text-sm text-gray-700">
+                        显示第 <span class="font-medium">${startItem}</span> 至 <span class="font-medium">${endItem}</span> 条，
+                        共 <span class="font-medium">${totalItems}</span> 条记录
+                    </p>
+                </div>
+                <div>
+                    <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="分页">
+        `;
+
+        // 上一页按钮
+        paginationHTML += `
+            <button
+                onclick="historyView.goToPage(${currentPage - 1})"
+                ${currentPage === 1 ? 'disabled' : ''}
+                class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+                <span class="sr-only">上一页</span>
+                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+            </button>
+        `;
+
+        // 页码按钮
+        const maxVisiblePages = 7;
+        let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+        let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+        
+        if (endPage - startPage < maxVisiblePages - 1) {
+            startPage = Math.max(1, endPage - maxVisiblePages + 1);
+        }
+
+        if (startPage > 1) {
+            paginationHTML += this.renderPageButton(1);
+            if (startPage > 2) {
+                paginationHTML += `<span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700">...</span>`;
+            }
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            paginationHTML += this.renderPageButton(i, i === currentPage);
+        }
+
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) {
+                paginationHTML += `<span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700">...</span>`;
+            }
+            paginationHTML += this.renderPageButton(totalPages);
+        }
+
+        // 下一页按钮
+        paginationHTML += `
+            <button
+                onclick="historyView.goToPage(${currentPage + 1})"
+                ${currentPage === totalPages ? 'disabled' : ''}
+                class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+                <span class="sr-only">下一页</span>
+                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
+                </svg>
+            </button>
+                    </nav>
+                </div>
+            </div>
+        `;
+
+        document.getElementById('history-pagination').innerHTML = paginationHTML;
+    }
+
+    /**
+     * 渲染单个页码按钮
+     * @param {number} pageNumber - 页码
+     * @param {boolean} isActive - 是否为当前页
+     * @returns {string}
+     */
+    renderPageButton(pageNumber, isActive = false) {
+        const activeClass = isActive 
+            ? 'z-10 bg-blue-600 border-blue-600 text-white' 
+            : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50';
+        
+        return `
+            <button
+                onclick="historyView.goToPage(${pageNumber})"
+                class="relative inline-flex items-center px-4 py-2 border text-sm font-medium ${activeClass}"
+            >
+                ${pageNumber}
+            </button>
+        `;
+    }
+
+    /**
+     * 跳转到指定页
+     * @param {number} page - 页码
+     */
+    goToPage(page) {
+        if (page < 1 || page > this.pagination.totalPages || page === this.pagination.currentPage) {
+            return;
+        }
+        
+        this.pagination.currentPage = page;
+        this.render();
+        
+        // 滚动到顶部
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     /**

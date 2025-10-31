@@ -43,7 +43,42 @@ class CommentExtractorService {
                 const data = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(data.error?.message || 'YouTube API请求失败');
+                    // 检查是否是配额错误
+                    if (response.status === 403) {
+                        const errorReason = data.error?.errors?.[0]?.reason || '';
+                        const errorMessage = data.error?.message || '';
+                        
+                        if (errorReason === 'quotaExceeded' || errorMessage.includes('quota')) {
+                            throw errorHandler.createAPIError(
+                                'YouTube API配额已用完。请稍后再试，或考虑使用DOM提取模式。',
+                                response.status,
+                                'YouTube API',
+                                {
+                                    reason: '配额超限',
+                                    suggestion: '可以在设置中切换到DOM提取模式，或等待配额重置'
+                                }
+                            );
+                        } else if (errorReason === 'invalidApiKey' || errorMessage.includes('key')) {
+                            throw errorHandler.createAPIError(
+                                'YouTube API密钥无效。请检查设置中的API密钥配置。',
+                                response.status,
+                                'YouTube API',
+                                {
+                                    reason: 'API密钥无效',
+                                    suggestion: '请前往Google Cloud Console检查API密钥是否正确'
+                                }
+                            );
+                        }
+                    }
+                    
+                    // 其他错误
+                    const errorMsg = data.error?.message || `HTTP ${response.status}`;
+                    throw errorHandler.createAPIError(
+                        `YouTube API请求失败: ${errorMsg}`,
+                        response.status,
+                        'YouTube API',
+                        data.error
+                    );
                 }
 
                 for (const item of data.items || []) {

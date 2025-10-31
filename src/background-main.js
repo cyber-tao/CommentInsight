@@ -4,8 +4,12 @@
 
 // 导入所有服务模块（Service Worker环境需要使用importScripts）
 importScripts(
+    'utils/logger.js',
+    'utils/constants.js',
+    'utils/error-handler.js',
     'utils/common.js',
     'utils/default-config.js',
+    'services/config-service.js',
     'services/platform-detector.js',
     'services/storage-service.js',
     'services/ai-service.js',
