@@ -44,7 +44,14 @@ class HistoryView extends BaseView {
             return matchesSearch && matchesPlatform;
         });
 
-        container.innerHTML = filteredHistory.map(item => this.createHistoryCard(item)).join('');
+        const fragment = document.createDocumentFragment();
+        container.innerHTML = '';
+        for (const item of filteredHistory) {
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = this.createHistoryCard(item);
+            fragment.appendChild(wrapper.firstElementChild || wrapper);
+        }
+        container.appendChild(fragment);
         this.attachHistoryButtonEvents();
     }
 
@@ -153,17 +160,17 @@ class HistoryView extends BaseView {
                 try {
                     const itemToDelete = this.viewer.currentData.history.find(item => item.id === itemId);
                     
-                    console.log('删除历史记录项:', itemToDelete);
+                    Logger.info('history', 'Delete history item', { id: itemId });
                     
                     // 使用存储键删除对应数据
                     const targetKey = itemToDelete?.storageKey || itemToDelete?.dataKey;
 
                     if (targetKey) {
                         const keyName = `comments_${targetKey}`;
-                        console.log('删除存储键:', keyName);
+                        Logger.debug('history', 'Remove storage key', { keyName });
                         await chrome.storage.local.remove([keyName]);
                     } else {
-                        console.warn('历史记录项缺少存储键:', itemToDelete);
+                        Logger.warn('history', 'History item missing storage key');
                     }
                     
                     // 从历史记录数组中移除
@@ -180,7 +187,7 @@ class HistoryView extends BaseView {
                     
                     this.showNotification('历史记录及相关数据已删除', 'success');
                 } catch (error) {
-                    console.error('删除历史记录失败:', error);
+                    Logger.error('history', 'Delete history failed', error);
                     this.showNotification('删除失败: ' + error.message, 'error');
                 }
             }
@@ -204,7 +211,7 @@ class HistoryView extends BaseView {
                         .filter(Boolean)
                         .map(key => `comments_${key}`);
 
-                    console.log('清空历史记录，将删除的键:', storageKeys);
+                    Logger.info('history', 'Clear history keys', { keys: storageKeys.length });
                     
                     if (storageKeys.length > 0) {
                         await chrome.storage.local.remove(storageKeys);
@@ -222,7 +229,7 @@ class HistoryView extends BaseView {
                     
                     this.showNotification(`已清空 ${history.length} 条历史记录及相关数据`, 'success');
                 } catch (error) {
-                    console.error('清空历史记录失败:', error);
+                    Logger.error('history', 'Clear history failed', error);
                     this.showNotification('清空失败: ' + error.message, 'error');
                 }
             }
@@ -260,7 +267,7 @@ class HistoryView extends BaseView {
         if (response.success) {
             this.showNotification('历史记录已导出', 'success');
         } else {
-            throw new Error(response.error || '导出失败');
+            throw new Error(this.mapError(response));
         }
     }
 }

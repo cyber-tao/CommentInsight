@@ -129,7 +129,27 @@ class CommonUtils {
             '天前': (match) => {
                 const days = parseInt(match.replace(/\D/g, '')) || 0;
                 return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-            }
+            },
+            'just now': () => new Date(),
+            'seconds ago': (match) => {
+                const seconds = parseInt(match.replace(/\D/g, '')) || 0;
+                return new Date(Date.now() - seconds * 1000);
+            },
+            'minutes ago': (match) => {
+                const minutes = parseInt(match.replace(/\D/g, '')) || 0;
+                return new Date(Date.now() - minutes * 60 * 1000);
+            },
+            'hours ago': (match) => {
+                const hours = parseInt(match.replace(/\D/g, '')) || 0;
+                return new Date(Date.now() - hours * 60 * 60 * 1000);
+            },
+            'days ago': (match) => {
+                const days = parseInt(match.replace(/\D/g, '')) || 0;
+                return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+            },
+            '昨天': () => new Date(Date.now() - 24 * 60 * 60 * 1000),
+            '前天': () => new Date(Date.now() - 48 * 60 * 60 * 1000),
+            'yesterday': () => new Date(Date.now() - 24 * 60 * 60 * 1000)
         };
 
         for (const [pattern, handler] of Object.entries(patterns)) {
@@ -194,8 +214,9 @@ class CommonUtils {
 
         const timePatterns = [
             /\d+秒前/, /\d+分钟前/, /\d+小时前/, /\d+天前/,
+            /\d+\s*seconds\s*ago/i, /\d+\s*minutes\s*ago/i, /\d+\s*hours\s*ago/i, /\d+\s*days\s*ago/i,
             /\d{4}-\d{2}-\d{2}/, /\d{2}-\d{2}/, /\d{2}:\d{2}/,
-            /刚刚/, /昨天/, /前天/
+            /刚刚/, /昨天/, /前天/, /just\s*now/i, /yesterday/i
         ];
 
         return timePatterns.some(pattern => pattern.test(text));
@@ -253,6 +274,14 @@ class CommonUtils {
             }
         });
     }
+
+    static ok(payload = {}) {
+        return Object.assign({ success: true }, payload);
+    }
+
+    static fail(code, message, payload = {}) {
+        return Object.assign({ success: false, errorCode: String(code || 'UNKNOWN'), error: String(message || '') }, payload);
+    }
 }
 
 // 导出到全局（兼容Chrome扩展环境）
@@ -263,5 +292,87 @@ if (typeof window !== 'undefined') {
 // 支持模块导出（如果环境支持）
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = CommonUtils;
+}
+
+class Logger {
+    static levels() {
+        return { debug: 0, info: 1, warn: 2, error: 3 };
+    }
+    static setLevel(level) {
+        const lv = this.levels()[level] ?? 1;
+        this._level = lv;
+    }
+    static getLevel() {
+        return this._level ?? 1;
+    }
+    static enable(enabled) {
+        this._enabled = !!enabled;
+    }
+    static isEnabled() {
+        return this._enabled !== false;
+    }
+    static prefix(ctx) {
+        const tag = 'CommentInsight';
+        return `[${tag}]${ctx ? `[${ctx}]` : ''}`;
+    }
+    static shouldLog(level) {
+        return this.isEnabled() && level >= this.getLevel();
+    }
+    static debug(ctx, msg, data) {
+        const lv = this.levels().debug;
+        if (!this.shouldLog(lv)) return;
+        if (data !== undefined) console.debug(this.prefix(ctx), String(msg || ''), data);
+        else console.debug(this.prefix(ctx), String(msg || ''));
+    }
+    static info(ctx, msg, data) {
+        const lv = this.levels().info;
+        if (!this.shouldLog(lv)) return;
+        if (data !== undefined) console.info(this.prefix(ctx), String(msg || ''), data);
+        else console.info(this.prefix(ctx), String(msg || ''));
+    }
+    static warn(ctx, msg, data) {
+        const lv = this.levels().warn;
+        if (!this.shouldLog(lv)) return;
+        if (data !== undefined) console.warn(this.prefix(ctx), String(msg || ''), data);
+        else console.warn(this.prefix(ctx), String(msg || ''));
+    }
+    static error(ctx, msg, data) {
+        const lv = this.levels().error;
+        if (!this.shouldLog(lv)) return;
+        if (data !== undefined) console.error(this.prefix(ctx), String(msg || ''), data);
+        else console.error(this.prefix(ctx), String(msg || ''));
+    }
+    static withContext(ctx) {
+        const c = String(ctx || '');
+        return {
+            debug: (msg, data) => Logger.debug(c, msg, data),
+            info: (msg, data) => Logger.info(c, msg, data),
+            warn: (msg, data) => Logger.warn(c, msg, data),
+            error: (msg, data) => Logger.error(c, msg, data)
+        };
+    }
+}
+
+if (typeof window !== 'undefined') {
+    window.Logger = Logger;
+}
+if (typeof self !== 'undefined') {
+    self.Logger = Logger;
+}
+
+const ErrorCodes = {
+    UNKNOWN_ACTION: 'Unknown action',
+    HANDLE_MESSAGE_ERROR: 'Error handling message',
+    PLATFORM_MISMATCH: 'Platform mismatch',
+    BILIBILI_EXTRACT_ERROR: 'Bilibili extract failed',
+    GET_PLATFORM_INFO_ERROR: 'Get platform info failed',
+    AI_REQUEST_FAILED: 'AI request failed'
+};
+
+if (typeof window !== 'undefined') {
+    window.ErrorCodes = ErrorCodes;
+}
+if (typeof self !== 'undefined') {
+    self.ErrorCodes = ErrorCodes;
 }
 

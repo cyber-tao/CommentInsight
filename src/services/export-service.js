@@ -39,7 +39,7 @@ class ExportService {
             }
 
         } catch (error) {
-            console.error('导出数据失败:', error);
+            Logger.error('export', 'Export data failed', error);
             throw error;
         }
     }
@@ -62,11 +62,11 @@ class ExportService {
                 const parentId = comment.parentId || "0";
                 
                 return [
-                    this.safeCsvCell(comment.author || ''),
-                    this.safeCsvCell(comment.text || ''),
-                    this.safeCsvCell(comment.timestamp || ''),
+                    CommonUtils.safeCsvCell(comment.author || ''),
+                    CommonUtils.safeCsvCell(comment.text || ''),
+                    CommonUtils.safeCsvCell(comment.timestamp || ''),
                     comment.likes || 0,
-                    this.safeCsvCell(parentId)
+                    CommonUtils.safeCsvCell(parentId)
                 ].join(',');
             })
         ].join('\n');
@@ -149,14 +149,7 @@ class ExportService {
      * @param {string} raw - 原始文本
      * @returns {string}
      */
-    static safeCsvCell(raw) {
-        let v = String(raw || '').replace(/"/g, '""');
-        if (/^[=+\-@]/.test(v)) {
-            v = "'" + v;
-        }
-        v = v.replace(/\r?\n/g, ' ');
-        return `"${v}"`;
-    }
+    
 
     /**
      * Markdown文本转义
@@ -228,7 +221,7 @@ class ExportService {
             try {
                 URL.revokeObjectURL(url);
             } catch (e) {
-                console.warn('清理Object URL失败:', e);
+                Logger.warn('export', 'Failed to revoke object URL', e);
             }
         }, 1000);
     }
@@ -242,4 +235,3 @@ if (typeof window !== 'undefined') {
 if (typeof self !== 'undefined' && typeof self.ExportService === 'undefined') {
     self.ExportService = ExportService;
 }
-

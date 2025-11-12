@@ -24,6 +24,8 @@ class BaseExtractor {
     async scrollToLoadMore(scrollContainer) {
         let lastHeight = 0;
         let stableCount = 0;
+        let iterations = 0;
+        const maxIterations = 50;
 
         while (true) {
             const container = scrollContainer || window;
@@ -34,7 +36,7 @@ class BaseExtractor {
             if (currentHeight === lastHeight) {
                 stableCount++;
                 if (stableCount >= 3) {
-                    console.log('连续3次高度未变化，停止滚动');
+                    Logger.info('extractor', 'Stop scrolling by stability');
                     break;
                 }
             } else {
@@ -49,6 +51,11 @@ class BaseExtractor {
             }
 
             await this.delay(1000);
+            iterations++;
+            if (iterations >= maxIterations) {
+                Logger.info('extractor', 'Stop scrolling by iteration cap', { maxIterations });
+                break;
+            }
         }
     }
 

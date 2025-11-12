@@ -5,7 +5,7 @@
 class YouTubeExtractor extends BaseExtractor {
     async extract(config) {
         try {
-            console.log('开始提取YouTube评论');
+            Logger.info('extractor-youtube', 'Start extracting YouTube comments');
 
             // 等待评论区域加载
             await this.waitForElement('#comments');
@@ -25,14 +25,15 @@ class YouTubeExtractor extends BaseExtractor {
                         comments.push(comment);
                     }
                 } catch (error) {
-                    console.warn('提取单个YouTube评论失败:', error);
+                    Logger.warn('extractor-youtube', 'Extract single YouTube comment failed', error);
                 }
             }
 
-            console.log(`成功提取${comments.length}条YouTube评论`);
+            Logger.info('extractor-youtube', 'Extraction done', { count: comments.length });
             return comments;
 
         } catch (error) {
+            Logger.error('extractor-youtube', 'Extract failed', error);
             throw new Error(`YouTube评论提取失败: ${error.message}`);
         }
     }

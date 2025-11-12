@@ -137,6 +137,19 @@
                     </h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
                         <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">启用日志</label>
+                            <div class="flex items-center space-x-2">
+                                <input type="checkbox" id="logging-enabled" class="mr-2">
+                                <select id="logging-level" class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                    <option value="debug">debug</option>
+                                    <option value="info">info</option>
+                                    <option value="warn">warn</option>
+                                    <option value="error">error</option>
+                                </select>
+                            </div>
+                            <p class="text-sm text-gray-500 mt-1">设置日志输出开关与级别</p>
+                        </div>
+                        <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">最大评论数</label>
                             <input type="number" id="platform-max-comments" value="100" min="10" max="1000" 
                                    class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
@@ -254,7 +267,9 @@
     <!-- 隐藏的文件输入 -->
     <input type="file" id="import-file" accept=".json" style="display: none;">
 
+    <script src="src/utils/common.js"></script>
     <script src="src/utils/default-config.js"></script>
+    <script src="src/services/credential-vault.js"></script>
     <script src="options.js"></script>
 </body>
 </html>

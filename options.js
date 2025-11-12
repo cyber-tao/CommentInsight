@@ -12,7 +12,6 @@ class CommentInsightOptions {
             // 初始化事件监听器
             this.initializeEventListeners();
             
-            // 加载配置
             await this.loadConfig();
             
             // 填充表单
@@ -21,9 +20,9 @@ class CommentInsightOptions {
             // 设置模式切换
             this.setupModeToggle();
             
-            console.log('配置页面初始化完成');
+            Logger.info('options', 'Options page initialized');
         } catch (error) {
-            console.error('初始化配置页面失败:', error);
+            Logger.error('options', 'Init options failed', error);
             this.showStatus('初始化失败: ' + error.message, 'error');
         }
     }
@@ -126,16 +125,26 @@ class CommentInsightOptions {
     async loadConfig() {
         try {
             const response = await this.sendMessage({ action: 'loadData', key: 'config' });
-            
             if (response.success && response.data) {
                 this.config = response.data;
             } else {
-                // 使用默认配置
                 this.config = this.getDefaultConfig();
                 await this.saveConfig(false);
             }
+            try {
+                const aiKey = await CredentialVault.getAIKey();
+                const ytKey = await CredentialVault.getYouTubeKey();
+                const twToken = await CredentialVault.getTwitterBearerToken();
+                this.config.ai = this.config.ai || {};
+                this.config.platforms = this.config.platforms || {};
+                this.config.platforms.youtube = this.config.platforms.youtube || {};
+                this.config.platforms.twitter = this.config.platforms.twitter || {};
+                this.config.ai.apiKey = aiKey || '';
+                this.config.platforms.youtube.apiKey = ytKey || '';
+                this.config.platforms.twitter.bearerToken = twToken || '';
+            } catch (_) {}
         } catch (error) {
-            console.error('加载配置失败:', error);
+            Logger.error('options', 'Load config failed', error);
             this.config = this.getDefaultConfig();
         }
         
@@ -193,6 +202,11 @@ class CommentInsightOptions {
                 modelSelect.innerHTML = '<option value="">请先配置API密钥并刷新模型列表</option>';
             }
 
+            // 日志配置
+            const logging = this.config.logging || { enabled: true, level: 'info' };
+            document.getElementById('logging-enabled').checked = logging.enabled !== false;
+            document.getElementById('logging-level').value = logging.level || 'info';
+
             // 平台配置
             // YouTube
             document.getElementById('youtube-api-key').value = this.config.platforms.youtube.apiKey || '';
@@ -220,7 +234,7 @@ class CommentInsightOptions {
             this.toggleExportCommentsSort();
 
         } catch (error) {
-            console.error('填充表单失败:', error);
+            Logger.error('options', 'Populate form failed', error);
             this.showStatus('填充表单失败: ' + error.message, 'error');
         }
     }
@@ -238,6 +252,10 @@ class CommentInsightOptions {
         }
         
         return {
+            logging: {
+                enabled: document.getElementById('logging-enabled').checked,
+                level: document.getElementById('logging-level').value
+            },
             ai: {
                 endpoint: endpointValue,
                 apiKey: document.getElementById('ai-api-key').value.trim(),
@@ -284,10 +302,20 @@ class CommentInsightOptions {
             }
 
             this.config = newConfig;
+            try {
+                await CredentialVault.setAIKey(this.config.ai.apiKey || '');
+                await CredentialVault.setYouTubeKey(this.config.platforms.youtube.apiKey || '');
+                await CredentialVault.setTwitterBearerToken(this.config.platforms.twitter.bearerToken || '');
+            } catch (_) {}
+
+            const toSave = JSON.parse(JSON.stringify(this.config));
+            toSave.ai.apiKey = '';
+            toSave.platforms.youtube.apiKey = '';
+            toSave.platforms.twitter.bearerToken = '';
 
             const response = await this.sendMessage({
                 action: 'saveData',
-                data: { config: this.config }
+                data: { config: toSave }
             });
 
             if (response.success) {
@@ -299,7 +327,7 @@ class CommentInsightOptions {
             }
 
         } catch (error) {
-            console.error('保存配置失败:', error);
+            Logger.error('options', 'Save config failed', error);
             this.showStatus('保存配置失败: ' + error.message, 'error');
         }
     }
@@ -387,7 +415,7 @@ class CommentInsightOptions {
             }
 
         } catch (error) {
-            console.error('测试AI连接失败:', error);
+            Logger.error('options', 'Test AI connection failed', error);
             document.getElementById('ai-test-result').textContent = `测试失败: ${error.message}`;
             document.getElementById('ai-test-result').className = 'ml-4 text-sm text-red-600';
         } finally {
@@ -453,7 +481,7 @@ class CommentInsightOptions {
             }
 
         } catch (error) {
-            console.error('刷新模型列表失败:', error);
+            Logger.error('options', 'Refresh AI models failed', error);
             this.showStatus('刷新模型列表失败: ' + error.message, 'error');
         } finally {
             // 恢复按钮状态
@@ -519,7 +547,7 @@ class CommentInsightOptions {
             
             return false;
         } catch (error) {
-            console.error('加载缓存模型失败:', error);
+            Logger.error('options', 'Load models cache failed', error);
             return false;
         }
     }
@@ -550,7 +578,7 @@ class CommentInsightOptions {
             this.showStatus('配置导出成功', 'success');
             
         } catch (error) {
-            console.error('导出配置失败:', error);
+            Logger.error('options', 'Export config failed', error);
             this.showStatus('导出配置失败: ' + error.message, 'error');
         }
     }
@@ -578,7 +606,7 @@ class CommentInsightOptions {
             try {
                 URL.revokeObjectURL(link.href);
             } catch (e) {
-                console.warn('清理Object URL失败:', e);
+                Logger.warn('options', 'Failed to revoke object URL', e);
             }
         }, 1000);
     }
@@ -624,7 +652,7 @@ class CommentInsightOptions {
                     this.showStatus('配置导入成功', 'success');
                     
                 } catch (error) {
-                    console.error('解析配置文件失败:', error);
+                    Logger.error('options', 'Parse config file failed', error);
                     this.showStatus('配置文件格式错误: ' + error.message, 'error');
                 }
             };
@@ -632,7 +660,7 @@ class CommentInsightOptions {
             reader.readAsText(file);
             
         } catch (error) {
-            console.error('导入配置失败:', error);
+            Logger.error('options', 'Import config failed', error);
             this.showStatus('导入配置失败: ' + error.message, 'error');
         }
     }
@@ -754,7 +782,7 @@ class CommentInsightOptions {
             statusBar.classList.add('hidden');
         }, 3000);
         
-        console.log(`[${type.toUpperCase()}] ${message}`);
+        Logger.info('options', message);
     }
 
     setupModeToggle() {
@@ -764,7 +792,7 @@ class CommentInsightOptions {
         const twitterApiVersion = document.getElementById('twitter-api-version');
         
         if (!twitterMode) {
-            console.warn('Twitter模式选择器未找到');
+            Logger.warn('options', 'Twitter mode selector not found');
             return;
         }
         
@@ -788,7 +816,7 @@ class CommentInsightOptions {
                     }
                 }
             } catch (error) {
-                console.error('切换Twitter字段显示失败:', error);
+                Logger.error('options', 'Toggle Twitter fields failed', error);
             }
         };
         

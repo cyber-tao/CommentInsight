@@ -5,12 +5,23 @@
 class CommentExtractor {
     constructor() {
         this.platform = this.detectCurrentPlatform();
-        this.extractors = {
-            youtube: new YouTubeExtractor(),
-            tiktok: new TikTokExtractor(),
-            twitter: new TwitterExtractor(),
-            bilibili: new BilibiliExtractor()
-        };
+        this.extractors = {};
+        try {
+            if (typeof YouTubeExtractor !== 'undefined' || (typeof window !== 'undefined' && window.YouTubeExtractor)) {
+                this.extractors.youtube = typeof YouTubeExtractor !== 'undefined' ? new YouTubeExtractor() : new window.YouTubeExtractor();
+            }
+            if (typeof TikTokExtractor !== 'undefined' || (typeof window !== 'undefined' && window.TikTokExtractor)) {
+                this.extractors.tiktok = typeof TikTokExtractor !== 'undefined' ? new TikTokExtractor() : new window.TikTokExtractor();
+            }
+            if (typeof TwitterExtractor !== 'undefined' || (typeof window !== 'undefined' && window.TwitterExtractor)) {
+                this.extractors.twitter = typeof TwitterExtractor !== 'undefined' ? new TwitterExtractor() : new window.TwitterExtractor();
+            }
+            if (typeof BilibiliExtractor !== 'undefined' || (typeof window !== 'undefined' && window.BilibiliExtractor)) {
+                this.extractors.bilibili = typeof BilibiliExtractor !== 'undefined' ? new BilibiliExtractor() : new window.BilibiliExtractor();
+            }
+        } catch (e) {
+            Logger.warn('content', 'Extractor initialization failed', e);
+        }
 
         this.initializeContentScript();
     }
@@ -38,7 +49,16 @@ class CommentExtractor {
             return true; // 保持异步响应通道开放
         });
 
-        console.log(`评论洞察扩展已在${this.platform}平台加载`);
+        Logger.info('content', `Extension loaded on ${this.platform}`);
+        try {
+            chrome.runtime.sendMessage({ action: 'getConfig' }, (resp) => {
+                if (resp && resp.success && resp.data) {
+                    const logging = resp.data.logging || { enabled: true, level: 'info' };
+                    Logger.enable(logging.enabled !== false);
+                    Logger.setLevel(logging.level || 'info');
+                }
+            });
+        } catch (_) {}
 
         // 监听YouTube的SPA导航
         if (this.platform === 'youtube') {
@@ -47,7 +67,7 @@ class CommentExtractor {
 
         // 心跳检测
         setInterval(() => {
-            console.log('内容脚本心跳:', this.platform, new Date().toISOString());
+            Logger.debug('content', 'Heartbeat', { platform: this.platform, time: new Date().toISOString() });
         }, 30000);
     }
 
@@ -61,7 +81,7 @@ class CommentExtractor {
         const notifyUrlChange = () => {
             const currentUrl = window.location.href;
             if (currentUrl !== lastUrl) {
-                console.log('YouTube SPA导航检测到URL变化:', currentUrl);
+                Logger.info('content', 'YouTube SPA navigation URL changed', { url: currentUrl });
                 lastUrl = currentUrl;
                 
                 // 等待页面渲染完成后通知background
@@ -70,7 +90,7 @@ class CommentExtractor {
                         action: 'youtubeNavigated',
                         url: currentUrl,
                         title: document.title.replace(/ - YouTube$/, '').trim()
-                    }).catch(err => console.log('通知导航失败:', err));
+                    }).catch(err => Logger.warn('content', 'Failed to notify navigation', err));
                 }, 500);
             }
         };
@@ -91,11 +111,11 @@ class CommentExtractor {
         // 监听YouTube特有的yt-navigate-finish事件
         document.addEventListener('yt-navigate-finish', notifyUrlChange);
         
-        console.log('YouTube SPA导航监听器已设置');
+        Logger.info('content', 'YouTube SPA listener set');
     }
 
     async handleMessage(message, sender, sendResponse) {
-        console.log('接收到消息:', message.action, '平台:', this.platform);
+        Logger.info('content', 'Message received', { action: message.action, platform: this.platform });
 
         (async () => {
             try {
@@ -103,50 +123,48 @@ class CommentExtractor {
 
                 switch (message.action) {
                     case 'extractYouTubeComments':
-                        if (this.platform === 'youtube') {
+                        if (this.platform === 'youtube' && this.extractors.youtube) {
                             result = await this.extractors.youtube.extract(message.config);
-                            sendResponse({ success: true, comments: result });
+                            sendResponse(CommonUtils.ok({ comments: result }));
                         } else {
-                            sendResponse({ success: false, error: '当前页面不是YouTube' });
+                            const msg = this.platform !== 'youtube' ? 'Current page is not YouTube' : 'Extractor not available';
+                            sendResponse(CommonUtils.fail(this.platform !== 'youtube' ? 'PLATFORM_MISMATCH' : 'EXTRACTOR_NOT_AVAILABLE', msg));
                         }
                         break;
                     case 'extractTikTokComments':
-                        if (this.platform === 'tiktok') {
+                        if (this.platform === 'tiktok' && this.extractors.tiktok) {
                             result = await this.extractors.tiktok.extract(message.config);
-                            sendResponse({ success: true, comments: result });
+                            sendResponse(CommonUtils.ok({ comments: result }));
                         } else {
-                            sendResponse({ success: false, error: '当前页面不是TikTok' });
+                            const msg = this.platform !== 'tiktok' ? 'Current page is not TikTok' : 'Extractor not available';
+                            sendResponse(CommonUtils.fail(this.platform !== 'tiktok' ? 'PLATFORM_MISMATCH' : 'EXTRACTOR_NOT_AVAILABLE', msg));
                         }
                         break;
 
                     case 'extractTwitterComments':
-                        if (this.platform === 'twitter') {
+                        if (this.platform === 'twitter' && this.extractors.twitter) {
                             result = await this.extractors.twitter.extract(message.config);
-                            sendResponse({ success: true, comments: result });
+                            sendResponse(CommonUtils.ok({ comments: result }));
                         } else {
-                            sendResponse({ success: false, error: '当前页面不是Twitter/X' });
+                            const msg = this.platform !== 'twitter' ? 'Current page is not Twitter/X' : 'Extractor not available';
+                            sendResponse(CommonUtils.fail(this.platform !== 'twitter' ? 'PLATFORM_MISMATCH' : 'EXTRACTOR_NOT_AVAILABLE', msg));
                         }
                         break;
 
                     case 'extractBilibiliComments':
-                        console.log('开始提取Bilibili评论...');
-                        if (this.platform === 'bilibili') {
+                        Logger.info('content', 'Start extracting Bilibili comments');
+                        if (this.platform === 'bilibili' && this.extractors.bilibili) {
                             try {
                                 result = await this.extractors.bilibili.extract(message.config);
-                                console.log('成功提取Bilibili评论:', result?.length || 0, '条');
-                                sendResponse({ success: true, comments: result });
+                                Logger.info('content', 'Bilibili comments extracted', { count: result?.length || 0 });
+                                sendResponse(CommonUtils.ok({ comments: result }));
                             } catch (extractError) {
-                                console.error('Bilibili评论提取错误:', extractError);
-                                sendResponse({
-                                    success: false,
-                                    error: `Bilibili评论提取失败: ${extractError.message}`
-                                });
+                                Logger.error('content', 'Bilibili extraction error', extractError);
+                                sendResponse(CommonUtils.fail('BILIBILI_EXTRACT_ERROR', `Bilibili extract failed: ${extractError.message}`));
                             }
                         } else {
-                            sendResponse({ 
-                                success: false, 
-                                error: `当前页面不是Bilibili（当前: ${this.platform}）` 
-                            });
+                            const msg = this.platform !== 'bilibili' ? `Current page is not Bilibili (current: ${this.platform})` : 'Extractor not available';
+                            sendResponse(CommonUtils.fail(this.platform !== 'bilibili' ? 'PLATFORM_MISMATCH' : 'EXTRACTOR_NOT_AVAILABLE', msg));
                         }
                         break;
 
@@ -208,29 +226,25 @@ class CommentExtractor {
                                     }
                                 }
 
-                                sendResponse({
-                                    success: true,
+                                sendResponse(CommonUtils.ok({
                                     platform: this.platform,
                                     url: window.location.href,
                                     title: pageTitle,
                                     description: pageDescription
-                                });
+                                }));
                             } catch (error) {
-                                sendResponse({
-                                    success: false,
-                                    error: error.message
-                                });
+                                sendResponse(CommonUtils.fail('GET_PLATFORM_INFO_ERROR', error.message));
                             }
                         })();
                         return true;
 
                     default:
-                        console.log('未知的操作类型:', message.action);
-                        sendResponse({ success: false, error: '未知的操作类型: ' + message.action });
+                        Logger.warn('content', 'Unknown action', { action: message.action });
+                        sendResponse(CommonUtils.fail('UNKNOWN_ACTION', 'Unknown action: ' + message.action));
                 }
             } catch (error) {
-                console.error('内容脚本处理消息失败:', error);
-                sendResponse({ success: false, error: '处理消息时出错: ' + error.message });
+                Logger.error('content', 'Failed to handle message', error);
+                sendResponse(CommonUtils.fail('HANDLE_MESSAGE_ERROR', 'Error handling message: ' + error.message));
             }
         })();
     }

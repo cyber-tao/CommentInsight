@@ -17,9 +17,9 @@ class StorageService {
             }
 
             await chrome.storage.local.set(payload);
-            console.log('数据保存成功');
+            Logger.info('storage', 'Data saved');
         } catch (error) {
-            console.error('数据保存失败:', error);
+            Logger.error('storage', 'Failed to save data', error);
             throw error;
         }
     }
@@ -40,7 +40,7 @@ class StorageService {
 
             return value;
         } catch (error) {
-            console.error('数据加载失败:', error);
+            Logger.error('storage', 'Failed to load data', error);
             throw error;
         }
     }
@@ -53,9 +53,9 @@ class StorageService {
     static async removeData(keys) {
         try {
             await chrome.storage.local.remove(keys);
-            console.log('数据删除成功');
+            Logger.info('storage', 'Data removed');
         } catch (error) {
-            console.error('数据删除失败:', error);
+            Logger.error('storage', 'Failed to remove data', error);
             throw error;
         }
     }
@@ -83,7 +83,18 @@ class StorageService {
             const result = await chrome.storage.local.get('analysis_history');
             let history = result.analysis_history || [];
 
-            const id = Date.now().toString(36) + Math.random().toString(36).substr(2);
+            let id = '';
+            try {
+                const arr = new Uint32Array(4);
+                if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+                    crypto.getRandomValues(arr);
+                    id = Array.from(arr).map(n => n.toString(36)).join('');
+                } else {
+                    id = CommonUtils.generateStableId(String(Date.now()) + storageKey);
+                }
+            } catch (_) {
+                id = CommonUtils.generateStableId(String(Date.now()) + storageKey);
+            }
             const storageKey = this.generatePageKey(entry.url);
 
             const newEntry = {
@@ -112,9 +123,9 @@ class StorageService {
             }
 
             await chrome.storage.local.set({ analysis_history: history });
-            console.log('已添加到分析历史');
+            Logger.info('storage', 'Added to analysis history');
         } catch (error) {
-            console.error('添加到分析历史失败:', error);
+            Logger.error('storage', 'Failed to add to analysis history', error);
         }
     }
 
@@ -124,21 +135,11 @@ class StorageService {
         }
 
         const safeConfig = JSON.parse(JSON.stringify(config));
-
-        if (safeConfig.ai && typeof safeConfig.ai.apiKey === 'string') {
-            safeConfig.ai.apiKey = this.encodeSecret(safeConfig.ai.apiKey);
-        }
-
+        if (safeConfig.ai) safeConfig.ai.apiKey = '';
         if (safeConfig.platforms) {
-            if (safeConfig.platforms.youtube && typeof safeConfig.platforms.youtube.apiKey === 'string') {
-                safeConfig.platforms.youtube.apiKey = this.encodeSecret(safeConfig.platforms.youtube.apiKey);
-            }
-
-            if (safeConfig.platforms.twitter && typeof safeConfig.platforms.twitter.bearerToken === 'string') {
-                safeConfig.platforms.twitter.bearerToken = this.encodeSecret(safeConfig.platforms.twitter.bearerToken);
-            }
+            if (safeConfig.platforms.youtube) safeConfig.platforms.youtube.apiKey = '';
+            if (safeConfig.platforms.twitter) safeConfig.platforms.twitter.bearerToken = '';
         }
-
         return safeConfig;
     }
 
@@ -148,21 +149,11 @@ class StorageService {
         }
 
         const safeConfig = JSON.parse(JSON.stringify(config));
-
-        if (safeConfig.ai && typeof safeConfig.ai.apiKey === 'string') {
-            safeConfig.ai.apiKey = this.decodeSecret(safeConfig.ai.apiKey);
-        }
-
+        if (safeConfig.ai) safeConfig.ai.apiKey = '';
         if (safeConfig.platforms) {
-            if (safeConfig.platforms.youtube && typeof safeConfig.platforms.youtube.apiKey === 'string') {
-                safeConfig.platforms.youtube.apiKey = this.decodeSecret(safeConfig.platforms.youtube.apiKey);
-            }
-
-            if (safeConfig.platforms.twitter && typeof safeConfig.platforms.twitter.bearerToken === 'string') {
-                safeConfig.platforms.twitter.bearerToken = this.decodeSecret(safeConfig.platforms.twitter.bearerToken);
-            }
+            if (safeConfig.platforms.youtube) safeConfig.platforms.youtube.apiKey = '';
+            if (safeConfig.platforms.twitter) safeConfig.platforms.twitter.bearerToken = '';
         }
-
         return safeConfig;
     }
 
@@ -211,7 +202,7 @@ class StorageService {
 
             return decoded;
         } catch (error) {
-            console.warn('解密配置失败:', error);
+            Logger.warn('storage', 'Failed to decode secret', error);
             return '';
         }
     }

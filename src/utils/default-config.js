@@ -3,6 +3,10 @@
  */
 
 const DefaultConfig = {
+    logging: {
+        enabled: true,
+        level: 'info'
+    },
     ai: {
         endpoint: 'https://api.openai.com/v1',
         apiKey: '',
@@ -73,5 +77,4 @@ if (typeof window !== 'undefined') {
 if (typeof self !== 'undefined') {
     self.DefaultConfig = DefaultConfig;
 }
-
 

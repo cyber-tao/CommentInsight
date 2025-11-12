@@ -8,6 +8,7 @@ importScripts(
     'utils/default-config.js',
     'services/platform-detector.js',
     'services/storage-service.js',
+    'services/credential-vault.js',
     'services/ai-service.js',
     'services/export-service.js',
     'services/comment-extractor-service.js'
@@ -39,18 +40,27 @@ class CommentInsightBackground {
         chrome.action.onClicked.addListener((tab) => {
             this.openSidePanel(tab);
         });
+
+        (async () => {
+            try {
+                const cfg = await StorageService.loadData('config');
+                const logging = (cfg && cfg.logging) || { enabled: true, level: 'info' };
+                Logger.enable(logging.enabled !== false);
+                Logger.setLevel(logging.level || 'info');
+            } catch (_) {}
+        })();
     }
 
     async openSidePanel(tab) {
         try {
             await chrome.sidePanel.open({ windowId: tab.windowId });
         } catch (error) {
-            console.error('打开侧边栏失败:', error);
+            Logger.error('background', 'Failed to open side panel', error);
         }
     }
 
     async onInstalled(details) {
-        console.log('评论洞察扩展已安装/更新', details);
+        Logger.info('background', 'Extension installed/updated', details);
 
         if (details.reason === 'install') {
             await StorageService.saveData({ config: DefaultConfig });
@@ -64,12 +74,12 @@ class CommentInsightBackground {
 
     async handleMessage(message, sender, sendResponse) {
         try {
-            console.log('收到消息:', message);
+            Logger.info('background', 'Message received', { action: message.action });
 
             switch (message.action) {
                 case 'detectPlatform':
                     const platform = PlatformDetector.detectPlatform(message.url);
-                    sendResponse({ success: true, platform });
+                    sendResponse(CommonUtils.ok({ platform }));
                     break;
 
                 case 'extractComments':
@@ -79,37 +89,59 @@ class CommentInsightBackground {
                         message.config,
                         message.tabId
                     );
-                    sendResponse({ success: true, comments });
+                    sendResponse(CommonUtils.ok({ comments }));
                     break;
 
                 case 'analyzeComments':
-                    const analysis = await AIService.analyzeComments(
-                        message.comments,
-                        message.config,
-                        message.videoTitle || '',
-                        message.videoDescription || ''
-                    );
-                    sendResponse({ success: true, analysis });
+                    {
+                        const cfg = { ...(message.config || {}) };
+                        cfg.ai = cfg.ai || {};
+                        if (!cfg.ai.apiKey) {
+                            const k = await CredentialVault.getAIKey();
+                            cfg.ai.apiKey = k || '';
+                        }
+                        const analysis = await AIService.analyzeComments(
+                            message.comments,
+                            cfg,
+                            message.videoTitle || '',
+                            message.videoDescription || ''
+                        );
+                        sendResponse(CommonUtils.ok({ analysis }));
+                    }
                     break;
 
                 case 'saveData':
                     await StorageService.saveData(message.data);
-                    sendResponse({ success: true });
+                    sendResponse(CommonUtils.ok());
                     break;
 
                 case 'loadData':
                     const data = await StorageService.loadData(message.key);
-                    sendResponse({ success: true, data });
+                    sendResponse(CommonUtils.ok({ data }));
                     break;
 
                 case 'testAIConnection':
-                    const testResult = await AIService.testConnection(message.config);
-                    sendResponse({ success: true, result: testResult });
+                    {
+                        const cfg = { ...(message.config || {}) };
+                        if (!cfg.apiKey) {
+                            const k = await CredentialVault.getAIKey();
+                            cfg.apiKey = k || '';
+                        }
+                        const testResult = await AIService.testConnection(cfg);
+                        sendResponse(CommonUtils.ok({ result: testResult }));
+                    }
                     break;
 
                 case 'getAIModels':
-                    const models = await AIService.getModels(message.config);
-                    sendResponse({ success: true, models });
+                    {
+                        const cfg = { ...(message.config || {}) };
+                        if (!cfg.apiKey) {
+                            const k = await CredentialVault.getAIKey();
+                            cfg.apiKey = k || '';
+                        }
+                        const models = await AIService.getModels(cfg);
+                        sendResponse(CommonUtils.ok({ models }));
+                    }
                     break;
 
                 case 'exportData':
@@ -118,7 +150,7 @@ class CommentInsightBackground {
                         message.format,
                         message.filename
                     );
-                    sendResponse({ success: true });
+                    sendResponse(CommonUtils.ok());
                     break;
 
                 case 'exportAnalysis':
@@ -127,7 +159,7 @@ class CommentInsightBackground {
                         'markdown',
                         message.filename
                     );
-                    sendResponse({ success: true });
+                    sendResponse(CommonUtils.ok());
                     break;
 
                 case 'exportComments':
@@ -136,7 +168,7 @@ class CommentInsightBackground {
                         'csv',
                         message.filename
                     );
-                    sendResponse({ success: true });
+                    sendResponse(CommonUtils.ok());
                     break;
 
                 case 'exportHistory':
@@ -145,65 +177,70 @@ class CommentInsightBackground {
                         'json',
                         message.filename
                     );
-                    sendResponse({ success: true });
+                    sendResponse(CommonUtils.ok());
                     break;
 
                 case 'extractProgress':
                     // 内容脚本的进度心跳，仅用于保持后台知情与日志记录
                     try {
-                        console.log('[Progress]', message?.platform || 'unknown', message?.stage || '', message?.payload || {});
+                        Logger.info('background', 'Progress', { platform: message?.platform || 'unknown', stage: message?.stage || '', payload: message?.payload || {} });
                     } catch (_) {}
-                    sendResponse({ success: true });
+                    sendResponse(CommonUtils.ok());
                     break;
 
                 case 'getConfig':
                     const config = await StorageService.loadData('config');
-                    sendResponse({ success: true, data: config });
+                    sendResponse(CommonUtils.ok({ data: config }));
                     break;
 
                 case 'youtubeNavigated':
                     // YouTube SPA导航通知 - 触发tabs.onUpdated事件
-                    console.log('YouTube SPA导航:', message.url, message.title);
+                    Logger.info('background', 'YouTube SPA navigation', { url: message.url, title: message.title });
                     if (sender.tab) {
-                        // 强制触发tabs.onUpdated，让popup可以更新标题
                         chrome.tabs.get(sender.tab.id).then(tab => {
                             this.onTabUpdated(sender.tab.id, { 
                                 status: 'complete',
                                 url: message.url
                             }, tab);
-                        });
+                        }).catch(err => Logger.warn('background', 'tabs.get failed', err));
                     }
-                    sendResponse({ success: true });
+                    sendResponse(CommonUtils.ok());
                     break;
 
                 default:
-                    sendResponse({ success: false, error: '未知的操作类型' });
+                    sendResponse(CommonUtils.fail('UNKNOWN_ACTION', 'Unknown action'));
             }
         } catch (error) {
-            console.error('处理消息时出错:', error);
-            sendResponse({ success: false, error: error.message });
+            Logger.error('background', 'Error handling message', error);
+            sendResponse(CommonUtils.fail('HANDLE_MESSAGE_ERROR', error.message));
         }
     }
 
     async onTabUpdated(tabId, changeInfo, tab) {
         if (changeInfo.url) {
             const platform = PlatformDetector.detectPlatform(changeInfo.url);
-            // 可以在这里发送消息给popup更新界面
+            Logger.debug('background', 'Tab updated', { tabId, url: changeInfo.url, platform });
         }
     }
 
     async extractComments(platform, url, config, tabId) {
         try {
-            console.log(`开始提取${platform}平台的评论`);
+            Logger.info('background', `Start extracting comments for ${platform}`);
 
             switch (platform) {
                 case 'youtube': {
-                    const apiKey = (config && config.platforms && config.platforms.youtube && config.platforms.youtube.apiKey) || '';
+                    let apiKey = (config && config.platforms && config.platforms.youtube && config.platforms.youtube.apiKey) || '';
+                    if (!apiKey) {
+                        apiKey = await CredentialVault.getYouTubeKey();
+                        if (config && config.platforms && config.platforms.youtube) {
+                            config.platforms.youtube.apiKey = apiKey || '';
+                        }
+                    }
                     if (apiKey) {
                         try {
                             return await CommentExtractorService.extractYouTubeComments(url, config);
                         } catch (apiError) {
-                            console.warn('YouTube API 提取失败，回退到 DOM 提取:', apiError?.message || apiError);
+                            Logger.warn('background', 'YouTube API failed, fallback to DOM', apiError?.message || apiError);
                             return await CommentExtractorService.extractViaContentScript(
                                 tabId,
                                 'extractYouTubeComments',
@@ -211,7 +248,6 @@ class CommentInsightBackground {
                             );
                         }
                     } else {
-                        // 无 API Key，直接使用 DOM 提取
                         return await CommentExtractorService.extractViaContentScript(
                             tabId,
                             'extractYouTubeComments',
@@ -229,6 +265,9 @@ class CommentInsightBackground {
 
                 case 'twitter':
                     const twitterConfig = config.platforms.twitter;
+                    if (twitterConfig.mode === 'api' && !twitterConfig.bearerToken) {
+                        twitterConfig.bearerToken = await CredentialVault.getTwitterBearerToken();
+                    }
                     if (twitterConfig.mode === 'api') {
                         return await CommentExtractorService.extractTwitterCommentsViaAPI(url, config);
                     } else {
@@ -247,10 +286,10 @@ class CommentInsightBackground {
                     );
 
                 default:
-                    throw new Error(`不支持的平台: ${platform}`);
+                    throw new Error(`Unsupported platform: ${platform}`);
             }
         } catch (error) {
-            console.error('提取评论失败:', error);
+            Logger.error('background', 'Failed to extract comments', error);
             throw error;
         }
     }

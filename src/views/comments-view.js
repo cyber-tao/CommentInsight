@@ -41,19 +41,19 @@ class CommentsView extends BaseView {
      * @param {Array} comments - 评论数组（可能是嵌套结构或平级结构）
      */
     setComments(comments) {
-        console.log('CommentsView.setComments 收到评论数量:', comments?.length || 0);
+        Logger.info('comments-view', 'Set comments', { count: comments?.length || 0 });
         
         // 检测数据结构类型
         const hasNestedReplies = comments && comments.length > 0 && 
                                  comments.some(c => c.replies && Array.isArray(c.replies) && c.replies.length > 0);
         
         if (hasNestedReplies) {
-            console.log('🔄 检测到嵌套结构，正在展平...');
+            Logger.debug('comments-view', 'Nested structure detected, flattening');
             // 将嵌套结构展平为平级结构，添加parentId字段
             this.allComments = this.flattenNestedComments(comments);
-            console.log('✅ 展平后的评论数量:', this.allComments.length);
+            Logger.info('comments-view', 'Flattened comments count', { count: this.allComments.length });
         } else {
-            console.log('✅ 检测到平级结构，直接使用');
+            Logger.info('comments-view', 'Flat structure detected, using directly');
             this.allComments = comments || [];
         }
         
@@ -101,14 +101,11 @@ class CommentsView extends BaseView {
     filterAndSort() {
         const comments = this.allComments || [];
         
-        console.log('CommentsView.filterAndSort 处理评论数量:', comments.length);
+        Logger.debug('comments-view', 'Filter and sort', { count: comments.length });
         
         // 调试：检查第一条评论的结构
         if (comments.length > 0) {
-            console.log('第一条评论数据:', comments[0]);
-            console.log('第一条评论的parentId:', comments[0].parentId);
-            console.log('parentId类型:', typeof comments[0].parentId);
-            console.log('parentId === "0":', comments[0].parentId === "0");
+            Logger.debug('comments-view', 'First comment sample');
             
             // 统计所有parentId的值
             const parentIdCounts = {};
@@ -116,7 +113,7 @@ class CommentsView extends BaseView {
                 const pid = c.parentId || 'undefined';
                 parentIdCounts[pid] = (parentIdCounts[pid] || 0) + 1;
             });
-            console.log('parentId值分布:', parentIdCounts);
+            Logger.debug('comments-view', 'ParentId distribution');
         }
         
         // 步骤1: 根据parentId组织数据
@@ -130,7 +127,7 @@ class CommentsView extends BaseView {
             return c.parentId && c.parentId !== "0" && c.parentId !== 0 && c.parentId !== "";
         });
         
-        console.log('主评论数量:', mainComments.length, '回复数量:', replies.length);
+        Logger.debug('comments-view', 'Counts', { mains: mainComments.length, replies: replies.length });
         
         // 为每个主评论添加其回复
         const organized = mainComments.map(mainComment => {
@@ -199,7 +196,14 @@ class CommentsView extends BaseView {
         const endIndex = startIndex + this.commentsPerPage;
         const pageComments = this.filteredComments.slice(startIndex, endIndex);
 
-        container.innerHTML = pageComments.map(comment => this.createCommentCard(comment)).join('');
+        const fragment = document.createDocumentFragment();
+        container.innerHTML = '';
+        for (const c of pageComments) {
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = this.createCommentCard(c);
+            fragment.appendChild(wrapper.firstElementChild || wrapper);
+        }
+        container.appendChild(fragment);
         this.attachReplyToggleListeners();
         this.renderPagination();
 
@@ -510,7 +514,7 @@ class CommentsView extends BaseView {
         // 将嵌套结构展平为平级结构，包含所有回复
         const flatComments = this.flattenCommentsForExport(this.filteredComments);
         
-        console.log('导出评论数量:', flatComments.length);
+        Logger.info('comments-view', 'Export comments', { count: flatComments.length });
         
         if (flatComments.length === 0) {
             this.showNotification('没有可导出的评论', 'warning');
@@ -540,7 +544,7 @@ class CommentsView extends BaseView {
         if (response.success) {
             this.showNotification('评论已导出（含回复）', 'success');
         } else {
-            throw new Error(response.error || '导出失败');
+            throw new Error(this.mapError(response));
         }
     }
 }

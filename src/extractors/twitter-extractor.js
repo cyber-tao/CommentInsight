@@ -5,13 +5,13 @@
 class TwitterExtractor extends BaseExtractor {
     async extract(config) {
         try {
-            console.log('开始提取Twitter评论');
+            Logger.info('extractor-twitter', 'Start extracting Twitter comments');
 
             await this.waitForElement('[data-testid="tweet"]');
             await this.delay(2000);
 
             const maxComments = config.platforms?.maxComments || 100;
-            console.log(`目标提取评论数: ${maxComments}`);
+            Logger.debug('extractor-twitter', 'Target max comments', { maxComments });
 
             const comments = [];
             const seenIds = new Set();
@@ -35,17 +35,17 @@ class TwitterExtractor extends BaseExtractor {
                             comments.push(comment);
                         }
                     } catch (error) {
-                        console.warn('提取单个Twitter评论失败:', error);
+                        Logger.warn('extractor-twitter', 'Extract single comment failed', error);
                     }
                 }
 
                 scrollCount++;
-                console.log(`当前评论数: ${comments.length}/${maxComments}`);
+                Logger.debug('extractor-twitter', 'Progress', { collected: comments.length, maxComments });
 
                 if (comments.length === lastCommentCount) {
                     noNewCommentsCount++;
                     if (noNewCommentsCount >= 3) {
-                        console.log('连续3次没有新评论，停止滚动');
+                        Logger.info('extractor-twitter', 'Stop by stability');
                         break;
                     }
                 } else {
@@ -54,7 +54,7 @@ class TwitterExtractor extends BaseExtractor {
                 }
             }
 
-            console.log(`成功提取${comments.length}条Twitter评论`);
+            Logger.info('extractor-twitter', 'Extraction done', { count: comments.length });
 
             if (comments.length === 0) {
                 throw new Error('未能提取到任何有效评论内容');

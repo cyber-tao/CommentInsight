@@ -25,8 +25,10 @@ class CommentExtractorService {
         try {
             let pageToken = '';
             const all = [];
+            let pages = 0;
+            const maxPages = 20;
             
-            while (all.length < targetCount) {
+            while (all.length < targetCount && pages < maxPages) {
                 const remaining = targetCount - all.length;
                 const pageSize = Math.min(100, Math.max(1, remaining));
                 const params = new URLSearchParams({
@@ -79,6 +81,7 @@ class CommentExtractorService {
 
                 pageToken = data.nextPageToken || '';
                 if (!pageToken) break;
+                pages++;
             }
 
             return all.slice(0, targetCount);
@@ -106,10 +109,12 @@ class CommentExtractorService {
                 config: config
             }, (response) => {
                 if (chrome.runtime.lastError) {
+                    Logger.error('extractor-service', 'Send message to tab failed', chrome.runtime.lastError);
                     reject(new Error('无法连接到页面脚本，请刷新页面后重试'));
                 } else if (response && response.success) {
                     resolve(response.comments);
                 } else {
+                    Logger.warn('extractor-service', 'Content script extraction failed', response);
                     reject(new Error(response?.error || '评论提取失败'));
                 }
             });
@@ -160,6 +165,7 @@ class CommentExtractorService {
                 try {
                     data = JSON.parse(responseText);
                 } catch (parseError) {
+                    Logger.warn('extractor-service', 'Twitter API response is not JSON');
                     throw new Error(`API响应不是有效的JSON: ${responseText.substring(0, 200)}`);
                 }
 
@@ -208,6 +214,7 @@ class CommentExtractorService {
             return allComments.slice(0, maxComments);
 
         } catch (error) {
+            Logger.error('extractor-service', 'Twitter API extract failed', error);
             throw new Error(`Twitter API提取失败: ${error.message}`);
         }
     }

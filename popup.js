@@ -38,7 +38,7 @@ class CommentInsightPopup {
             this.updateAIModelDisplay();
 
         } catch (error) {
-            console.error('初始化弹出窗口失败:', error);
+            Logger.error('popup', 'Init popup failed', error);
             this.showNotification('初始化失败: ' + error.message, 'error');
         }
     }
@@ -79,12 +79,12 @@ class CommentInsightPopup {
             if (currentTabs.length > 0 && currentTabs[0].id === tabId) {
                 // URL变化时立即更新
                 if (changeInfo.url) {
-                    console.log('检测到URL变化:', changeInfo.url);
+                    Logger.info('popup', 'URL changed', { url: changeInfo.url });
                     await this.onTabChanged(tabId, { isUrlChange: true });
                 }
                 // 页面加载完成时更新标题（无论URL是否变化）
                 if (changeInfo.status === 'complete' && this.currentTab && this.currentTab.id === tabId) {
-                    console.log('页面加载完成，更新标题');
+                    Logger.info('popup', 'Page load complete, update title');
                     await this.updateTabTitle(tabId);
                 }
             }
@@ -93,7 +93,7 @@ class CommentInsightPopup {
         // 监听来自content script的YouTube SPA导航通知
         chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (message.action === 'youtubeNavigated') {
-                console.log('接收到YouTube SPA导航通知:', message.url, message.title);
+                Logger.info('popup', 'YouTube SPA navigation', { url: message.url, title: message.title });
                 // 检查是否是当前标签页
                 if (sender.tab && this.currentTab && sender.tab.id === this.currentTab.id) {
                     // 更新当前标签页信息
@@ -109,7 +109,7 @@ class CommentInsightPopup {
                         // 加载新页面的数据
                         return this.loadSavedData();
                     }).catch(err => {
-                        console.error('处理YouTube导航失败:', err);
+                        Logger.error('popup', 'Handle YouTube navigation failed', err);
                     });
                 }
             }
@@ -126,7 +126,7 @@ class CommentInsightPopup {
             
             // 如果是插件页面，不更新面板
             if (isExtensionPage) {
-                console.log('切换到插件页面，保持当前状态');
+                Logger.info('popup', 'Switched to extension page, keep state');
                 return;
             }
             
@@ -145,7 +145,7 @@ class CommentInsightPopup {
             if (changeInfo.isTabSwitch) {
                 // TAB切换：页面已经加载完成，直接使用tab的标题
                 this.currentTab = tab;
-                console.log('TAB切换，使用当前标题:', tab.title);
+                Logger.info('popup', 'Tab activated, use current title', { title: tab.title });
             } else if (changeInfo.isUrlChange) {
                 // URL变化：页面正在加载，使用临时标题
                 this.currentTab = {
@@ -153,7 +153,7 @@ class CommentInsightPopup {
                     url: tab.url,
                     title: '加载中...'
                 };
-                console.log('URL变化，等待标题加载');
+                Logger.info('popup', 'URL changed, wait title');
             } else {
                 // 其他情况，使用tab的标题
                 this.currentTab = tab;
@@ -169,9 +169,9 @@ class CommentInsightPopup {
             // 加载新页面的数据（从历史记录恢复）
             await this.loadSavedData();
 
-            console.log('页面已切换，面板已更新');
+            Logger.info('popup', 'Page switched, panel updated');
         } catch (error) {
-            console.error('页面切换处理失败:', error);
+            Logger.error('popup', 'Handle page switch failed', error);
         }
     }
 
@@ -180,14 +180,14 @@ class CommentInsightPopup {
             const tab = await chrome.tabs.get(tabId);
             
             if (!this.currentTab || this.currentTab.id !== tabId) {
-                console.log('updateTabTitle: tab不匹配，跳过');
+                Logger.debug('popup', 'updateTabTitle: tab mismatch, skip');
                 return;
             }
 
             // 直接使用tab.title，Chrome已经帮我们管理好了
             const oldTitle = this.currentTab.title;
             this.currentTab.title = tab.title;
-            console.log('updateTabTitle: 标题更新', {
+            Logger.info('popup', 'updateTabTitle: title updated', {
                 旧标题: oldTitle,
                 新标题: tab.title,
                 URL: tab.url
@@ -195,7 +195,7 @@ class CommentInsightPopup {
             
             this.updatePlatformUI();
         } catch (error) {
-            console.warn('更新标题失败:', error);
+            Logger.warn('popup', 'Update title failed', error);
         }
     }
 
@@ -239,8 +239,13 @@ class CommentInsightPopup {
             } else {
                 this.config = this.getDefaultConfig();
             }
+            try {
+                const logging = this.config.logging || { enabled: true, level: 'info' };
+                Logger.enable(logging.enabled !== false);
+                Logger.setLevel(logging.level || 'info');
+            } catch (_) {}
         } catch (error) {
-            console.warn('加载配置失败，使用默认配置:', error);
+            Logger.warn('popup', 'Load config failed, use default', error);
             this.config = this.getDefaultConfig();
         }
     }
@@ -272,22 +277,22 @@ class CommentInsightPopup {
                         if (platformInfo.success) {
                             if (platformInfo.title) {
                                 this.currentTab.title = platformInfo.title;
-                                console.log('从content script获取标题:', platformInfo.title);
+                                Logger.info('popup', 'Get title from content script', { title: platformInfo.title });
                             }
                             if (platformInfo.description) {
                                 this.currentDescription = platformInfo.description;
-                                console.log('从content script获取简介:', platformInfo.description.substring(0, 100) + '...');
+                                Logger.info('popup', 'Get description from content script');
                             }
                         }
                     } catch (e) {
-                        console.warn('获取平台信息失败:', e);
+                        Logger.warn('popup', 'Get platform info failed', e);
                     }
                 }
                 
                 this.updatePlatformUI();
             }
         } catch (error) {
-            console.error('检测平台失败:', error);
+            Logger.error('popup', 'Detect platform failed', error);
         }
     }
 
@@ -347,7 +352,7 @@ class CommentInsightPopup {
                 this.currentComments = response.data.comments || [];
                 this.currentAnalysis = response.data.analysis || null;
                 this.currentStorageKey = storageKey;
-                console.log('从历史记录恢复数据:', {
+                Logger.info('popup', 'Restore data from history', {
                     commentCount: this.currentComments.length,
                     hasAnalysis: !!this.currentAnalysis
                 });
@@ -359,7 +364,7 @@ class CommentInsightPopup {
 
             this.updateUI();
         } catch (error) {
-            console.warn('加载已保存数据失败:', error);
+            Logger.warn('popup', 'Load saved data failed', error);
             this.currentComments = [];
             this.currentAnalysis = null;
             this.currentStorageKey = this.generatePageKey();
@@ -415,7 +420,7 @@ class CommentInsightPopup {
                 description: this.currentDescription || ''
             };
             
-            console.log('🔒 锁定视频信息:', {
+            Logger.debug('popup', 'Lock video snapshot', {
                 title: videoSnapshot.title,
                 url: videoSnapshot.url
             });
@@ -432,12 +437,7 @@ class CommentInsightPopup {
             });
 
             if (response.success) {
-                console.log('✅ 提取成功，评论数量:', response.comments.length);
-                console.log('📊 评论数据结构检查:');
-                console.log('  - 第一条评论:', response.comments[0]);
-                console.log('  - 有parentId字段:', response.comments.every(c => 'parentId' in c));
-                console.log('  - 主评论数:', response.comments.filter(c => c.parentId === "0").length);
-                console.log('  - 回复数:', response.comments.filter(c => c.parentId !== "0").length);
+                Logger.info('popup', 'Extract success', { count: response.comments.length });
                 
                 // 检查当前URL是否与操作开始时的URL一致
                 const currentUrl = this.currentTab?.url || '';
@@ -448,7 +448,7 @@ class CommentInsightPopup {
                     this.currentComments = response.comments;
                 } else {
                     // URL不一致，创建临时数据用于保存
-                    console.log('⚠️ 标签页已切换，不更新内存数据');
+                    Logger.warn('popup', 'Tab switched, skip updating memory');
                 }
                 
                 // 使用快照保存数据到存储（总是保存）
@@ -459,19 +459,17 @@ class CommentInsightPopup {
                     // URL一致，更新UI
                     this.updateUI();
                     this.showNotification(`成功提取 ${response.comments.length} 条评论（含回复）`, 'success');
-                    console.log('✅ 更新UI（当前标签页匹配）');
+                    Logger.info('popup', 'Update UI (tab matched)');
                 } else {
                     // URL不一致，静默完成
-                    console.log('💾 数据已保存，但不更新UI');
-                    console.log('  - 操作URL:', videoSnapshot.url);
-                    console.log('  - 当前URL:', currentUrl);
+                    Logger.debug('popup', 'Data saved but UI not updated');
                 }
             } else {
-                throw new Error(response.error);
+                throw new Error(this.mapError(response));
             }
 
         } catch (error) {
-            console.error('提取评论失败:', error);
+            Logger.error('popup', 'Extract comments failed', error);
             this.showNotification('提取评论失败: ' + error.message, 'error');
         } finally {
             this.setLoadingState('extract', false);
@@ -485,11 +483,7 @@ class CommentInsightPopup {
                 return;
             }
 
-            if (!this.config.ai.apiKey) {
-                this.showNotification('请先配置AI API密钥', 'warning');
-                chrome.runtime.openOptionsPage();
-                return;
-            }
+            // 背景页会从会话凭据库自动补全AI密钥，无需在此校验
 
             // 🔒 锁定当前视频信息（防止标签页切换导致数据错乱）
             const videoSnapshot = {
@@ -500,7 +494,7 @@ class CommentInsightPopup {
                 description: this.currentDescription || ''
             };
             
-            console.log('🔒 锁定视频信息（分析）:', {
+            Logger.debug('popup', 'Lock video snapshot (analysis)', {
                 title: videoSnapshot.title,
                 url: videoSnapshot.url
             });
@@ -521,6 +515,10 @@ class CommentInsightPopup {
                 videoDescription: videoSnapshot.description || ''
             });
 
+            if (!response.success) {
+                throw new Error(this.mapError(response));
+            }
+
             const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2); // 计算耗时
 
             if (response.success) {
@@ -536,7 +534,7 @@ class CommentInsightPopup {
                     this.currentAnalysis = response.analysis;
                 } else {
                     // URL不一致，不更新内存数据
-                    console.log('⚠️ 标签页已切换，不更新内存数据');
+                    Logger.warn('popup', 'Tab switched, skip updating memory');
                 }
                 
                 // 使用快照保存数据到存储（总是保存）
@@ -547,19 +545,17 @@ class CommentInsightPopup {
                     // URL一致，更新UI
                     this.updateUI();
                     this.showNotification('AI分析完成', 'success');
-                    console.log('✅ 更新UI（当前标签页匹配）');
+                    Logger.info('popup', 'Update UI (tab matched)');
                 } else {
                     // URL不一致，静默完成
-                    console.log('💾 分析结果已保存，但不更新UI');
-                    console.log('  - 操作URL:', videoSnapshot.url);
-                    console.log('  - 当前URL:', currentUrl);
+                    Logger.debug('popup', 'Analysis saved but UI not updated');
                 }
             } else {
-                throw new Error(response.error);
+                throw new Error(this.mapError(response));
             }
 
         } catch (error) {
-            console.error('AI分析失败:', error);
+            Logger.error('popup', 'AI analysis failed', error);
             this.showNotification('AI分析失败: ' + error.message, 'error');
         } finally {
             this.setLoadingState('analyze', false);
@@ -571,9 +567,13 @@ class CommentInsightPopup {
         
         switch (platform) {
             case 'youtube':
-                return this.config.platforms.youtube.apiKey;
+                return true; // 后台将从凭据库补全或回退到DOM提取
             case 'twitter':
-                return this.config.platforms.twitter.bearerToken;
+                // 仅当使用API模式时需要Bearer Token
+                if (this.config.platforms.twitter.mode === 'api') {
+                    return !!this.config.platforms.twitter.bearerToken;
+                }
+                return true;
             case 'tiktok':
                 return true; // TikTok使用DOM解析，不需要API密钥
             case 'bilibili':
@@ -601,22 +601,22 @@ class CommentInsightPopup {
             const storageKey = this.generatePageKey(url);
 
             if (videoSnapshot) {
-                console.log('💾 保存数据（使用快照）:', {
-                    title: title,
-                    url: url,
+                Logger.debug('popup', 'Save data (snapshot)', {
+                    title,
+                    url,
                     storageKey,
                     commentCount: this.currentComments?.length || 0
                 });
             } else {
-                console.log('💾 保存数据（使用当前标签页）:', {
-                    title: title,
-                    url: url,
+                Logger.debug('popup', 'Save data (current tab)', {
+                    title,
+                    url,
                     storageKey,
                     commentCount: this.currentComments?.length || 0
                 });
             }
             
-            console.log('评论数据示例:', this.currentComments?.[0]);
+            Logger.debug('popup', 'Comments sample');
 
             await this.persistDataForKey(data, storageKey);
 
@@ -624,7 +624,7 @@ class CommentInsightPopup {
             await this.saveToHistory(data, storageKey);
 
         } catch (error) {
-            console.error('保存数据失败:', error);
+            Logger.error('popup', 'Save data failed', error);
         }
     }
 
@@ -644,9 +644,9 @@ class CommentInsightPopup {
 
             const storageKey = this.generatePageKey(url);
 
-            console.log('💾 保存数据（使用快照和独立数据）:', {
-                title: title,
-                url: url,
+            Logger.debug('popup', 'Save data (snapshot & separate)', {
+                title,
+                url,
                 storageKey,
                 commentCount: comments?.length || 0,
                 hasAnalysis: !!analysis
@@ -658,13 +658,13 @@ class CommentInsightPopup {
             await this.saveToHistory(data, storageKey);
 
         } catch (error) {
-            console.error('保存数据失败:', error);
+            Logger.error('popup', 'Save data failed', error);
         }
     }
 
     async saveToHistory(data, storageKey) {
         try {
-            console.log('开始保存历史记录:', {
+            Logger.info('popup', 'Start saving history', {
                 storageKey,
                 url: data.url,
                 platform: data.platform,
@@ -677,7 +677,7 @@ class CommentInsightPopup {
             });
 
             let history = response.success ? (response.data || []) : [];
-            console.log('当前历史记录数量:', history.length);
+            Logger.debug('popup', 'Current history count', { count: history.length });
             const key = storageKey || this.generatePageKey(data.url);
             
             // 实现去重逻辑：对相同页面的存档进行更新（兼容旧字段）
@@ -698,23 +698,23 @@ class CommentInsightPopup {
                 timestamp: existingIndex !== -1 ? history[existingIndex].timestamp : new Date().toISOString()
             };
             
-            console.log('准备保存的历史记录:', historyItem);
+            Logger.debug('popup', 'History item to save');
 
             if (existingIndex !== -1) {
                 // 更新现有记录
                 historyItem.timestamp = new Date().toISOString();
                 history[existingIndex] = historyItem;
-                console.log('更新现有历史记录，索引:', existingIndex);
+                Logger.debug('popup', 'Update existing history', { index: existingIndex });
             } else {
                 // 添加新记录到列表头部
                 history.unshift(historyItem);
-                console.log('添加新历史记录，新总数:', history.length);
+                Logger.debug('popup', 'Add new history', { count: history.length });
             }
 
             // 保持最多100条历史记录
             if (history.length > 100) {
                 history = history.slice(0, 100);
-                console.log('超出限制，裁剪到100条');
+                Logger.info('popup', 'Trim history to 100');
             }
 
             const saveResult = await this.sendMessage({
@@ -723,13 +723,13 @@ class CommentInsightPopup {
             });
             
             if (saveResult.success) {
-                console.log('历史记录保存成功，当前总数:', history.length);
+                Logger.info('popup', 'History saved', { count: history.length });
             } else {
-                console.error('历史记录保存失败:', saveResult.error);
+                Logger.error('popup', 'History save failed', saveResult.error);
             }
 
         } catch (error) {
-            console.error('保存历史记录失败:', error);
+            Logger.error('popup', 'Save history failed', error);
         }
     }
 
@@ -832,18 +832,35 @@ class CommentInsightPopup {
     async sendMessageToTab(message) {
         return new Promise((resolve) => {
             if (!this.currentTab || !this.currentTab.id) {
-                resolve({ success: false, error: 'No active tab' });
+                resolve({ success: false, error: 'No active tab', errorCode: 'NO_ACTIVE_TAB' });
                 return;
             }
             
             chrome.tabs.sendMessage(this.currentTab.id, message, (response) => {
                 if (chrome.runtime.lastError) {
-                    resolve({ success: false, error: chrome.runtime.lastError.message });
+                    resolve({ success: false, error: chrome.runtime.lastError.message, errorCode: 'RUNTIME_ERROR' });
                 } else {
-                    resolve(response || { success: false, error: 'No response' });
+                    resolve(response || { success: false, error: 'No response', errorCode: 'NO_RESPONSE' });
                 }
             });
         });
+    }
+
+    mapError(resp) {
+        const code = resp?.errorCode;
+        if (!code) return resp?.error || '操作失败';
+        const map = {
+            UNKNOWN_ACTION: '未知的操作类型',
+            HANDLE_MESSAGE_ERROR: '处理消息时发生错误',
+            PLATFORM_MISMATCH: '当前页面不匹配目标平台',
+            BILIBILI_EXTRACT_ERROR: 'B站评论提取失败',
+            GET_PLATFORM_INFO_ERROR: '获取页面信息失败',
+            AI_REQUEST_FAILED: 'AI 请求失败',
+            NO_ACTIVE_TAB: '当前没有活动标签页',
+            RUNTIME_ERROR: '浏览器运行时错误',
+            NO_RESPONSE: '页面未响应'
+        };
+        return map[code] || (resp?.error || '操作失败');
     }
 
     showNotification(message, type = 'info') {
@@ -886,6 +903,5 @@ class CommentInsightPopup {
 // 当DOM加载完成时初始化弹出窗口
 document.addEventListener('DOMContentLoaded', () => {
     window.commentInsightPopup = new CommentInsightPopup();
-    console.log('🚀 CommentInsight Popup 已初始化');
-    console.log('💡 提示：在控制台中使用 window.commentInsightPopup 访问实例');
+    Logger.info('popup', 'CommentInsight Popup initialized');
 });

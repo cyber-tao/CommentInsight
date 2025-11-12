@@ -5,11 +5,8 @@
   "description": "从社交媒体平台提取评论并进行AI分析，生成洞察摘要和情感分析",
   "permissions": [
     "storage",
-    "activeTab",
-    "scripting",
     "tabs",
     "downloads",
-    "notifications",
     "sidePanel"
   ],
   "host_permissions": [
@@ -58,5 +55,8 @@
     "128": "icons/icon128.png"
   },
   "web_accessible_resources": []
+  ,"content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
 }
 

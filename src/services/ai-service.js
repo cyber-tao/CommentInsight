@@ -3,6 +3,17 @@
  */
 
 class AIService {
+    static _lastRequestAt = 0;
+    static _minIntervalMs = 500;
+    static async ensureRate() {
+        const now = Date.now();
+        const since = now - (AIService._lastRequestAt || 0);
+        if (since < AIService._minIntervalMs) {
+            const jitter = Math.floor(Math.random() * 100);
+            await CommonUtils.delay(AIService._minIntervalMs - since + jitter);
+        }
+        AIService._lastRequestAt = Date.now();
+    }
     /**
      * 分析评论
      * @param {Array} comments - 评论数组
@@ -13,7 +24,7 @@ class AIService {
      */
     static async analyzeComments(comments, config, videoTitle = '', videoDescription = '') {
         try {
-            console.log('开始分析评论');
+            Logger.info('ai', 'Start analyzing comments');
 
             const aiConfig = config.ai;
             if (!aiConfig.apiKey) {
@@ -23,13 +34,13 @@ class AIService {
             const normalizedMaxTokens = this.normalizeMaxTokens(aiConfig.maxTokens);
             const charLimitPerChunk = this.estimateCharLimit(normalizedMaxTokens);
 
-            console.log(`模型最大令牌数: ${normalizedMaxTokens}, 字符限制: ${charLimitPerChunk}`);
+            Logger.debug('ai', 'Token and char limits', { maxTokens: normalizedMaxTokens, charLimitPerChunk });
 
             const totalChars = comments.map(c => c.text || '').join('').length;
             const needsChunking = totalChars > charLimitPerChunk;
 
             if (needsChunking) {
-                console.log(`触发分块分析 - 评论数: ${comments.length}, 总字符数: ${totalChars}`);
+                Logger.info('ai', 'Chunked analysis triggered', { comments: comments.length, totalChars });
                 const partials = await this.summarizeInChunks(comments, aiConfig, charLimitPerChunk, normalizedMaxTokens, videoTitle, videoDescription);
                 const final = await this.finalizeSummary(partials, aiConfig, comments.length, normalizedMaxTokens, videoTitle, videoDescription);
                 return {
@@ -74,7 +85,7 @@ class AIService {
             };
 
         } catch (error) {
-            console.error('AI分析失败:', error);
+            Logger.error('ai', 'Analyze comments failed', error);
             throw error;
         }
     }
@@ -141,7 +152,7 @@ class AIService {
         }
         if (buffer.length > 0) chunks.push(buffer);
 
-        console.log(`分块分析：总共 ${comments.length} 条评论，分为 ${chunks.length} 个批次`);
+        Logger.info('ai', 'Chunk analysis', { comments: comments.length, chunks: chunks.length });
 
         const results = [];
         let totalTokens = 0;
@@ -184,7 +195,7 @@ class AIService {
             if (!data.success) throw new Error(data.error || '分批总结失败');
             results.push(data.text);
             totalTokens += data.tokensUsed || 0;
-            console.log(`完成第 ${i + 1}/${chunks.length} 批次分析, Tokens: ${data.tokensUsed}`);
+            Logger.debug('ai', 'Chunk done', { index: i + 1, total: chunks.length, tokens: data.tokensUsed });
         }
         return { results, tokensUsed: totalTokens };
     }
@@ -264,6 +275,7 @@ class AIService {
 
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
             try {
+                await AIService.ensureRate();
                 const response = await fetch(`${aiConfig.endpoint}/chat/completions`, {
                     method: 'POST',
                     headers: {
@@ -286,7 +298,7 @@ class AIService {
                         data = JSON.parse(rawText);
                     } catch (parseError) {
                         // 保留原始文本用于错误提示
-                        console.warn('AI响应不是有效的JSON:', parseError);
+                    Logger.warn('ai', 'AI response not valid JSON', parseError);
                     }
                 }
 
@@ -361,6 +373,7 @@ class AIService {
         try {
             const testPrompt = '请回复"连接成功"来确认API连接正常。';
 
+            await AIService.ensureRate();
             const response = await fetch(`${config.endpoint}/chat/completions`, {
                 method: 'POST',
                 headers: {
@@ -404,6 +417,7 @@ class AIService {
      */
     static async getModels(config) {
         try {
+            await AIService.ensureRate();
             const response = await fetch(`${config.endpoint}/models`, {
                 headers: {
                     'Authorization': `Bearer ${config.apiKey}`
@@ -422,7 +436,7 @@ class AIService {
                 throw new Error(data.error?.message || '获取模型列表失败');
             }
         } catch (error) {
-            console.error('获取AI模型失败:', error);
+            Logger.error('ai', 'Get AI models failed', error);
             throw error;
         }
     }

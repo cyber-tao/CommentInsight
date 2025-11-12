@@ -77,7 +77,7 @@ class AnalysisView extends BaseView {
         if (response.success) {
             this.showNotification('分析结果已导出', 'success');
         } else {
-            throw new Error(response.error || '导出失败');
+            throw new Error(this.mapError(response));
         }
     }
 }
@@ -86,4 +86,3 @@ class AnalysisView extends BaseView {
 if (typeof window !== 'undefined') {
     window.AnalysisView = AnalysisView;
 }
-

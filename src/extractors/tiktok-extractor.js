@@ -5,12 +5,12 @@
 class TikTokExtractor extends BaseExtractor {
     async extract(config) {
         try {
-            console.log('开始提取TikTok评论');
+            Logger.info('extractor-tiktok', 'Start extracting TikTok comments');
 
             await this.delay(3000);
 
             const maxComments = config.platforms?.maxComments || 100;
-            console.log(`目标提取评论数: ${maxComments}`);
+            Logger.debug('extractor-tiktok', 'Target max comments', { maxComments });
 
             const comments = [];
             const seenIds = new Set();
@@ -18,6 +18,8 @@ class TikTokExtractor extends BaseExtractor {
             let stableIterations = 0;
             let lastCollected = 0;
 
+            let iterations = 0;
+            const maxIterations = 80;
             while (comments.length < maxComments) {
                 const scrolled = await this.scrollCommentsSection();
                 await this.delay(800);
@@ -54,17 +56,17 @@ class TikTokExtractor extends BaseExtractor {
                             }
                         }
                     } catch (error) {
-                        console.warn('提取单个评论失败:', error);
+                        Logger.warn('extractor-tiktok', 'Extract single comment failed', error);
                     }
                 }
 
-                console.log(`当前评论数: ${comments.length}/${maxComments}`);
+                Logger.debug('extractor-tiktok', 'Progress', { collected: comments.length, maxComments });
 
                 // 检查是否无新增内容
                 if (comments.length === lastCollected && !scrolled) {
                     stableIterations++;
                     if (stableIterations >= 5) {
-                        console.log('多次迭代后无新增内容，停止提取');
+                        Logger.info('extractor-tiktok', 'Stop by stability');
                         break;
                     }
                 } else {
@@ -72,9 +74,15 @@ class TikTokExtractor extends BaseExtractor {
                 }
 
                 lastCollected = comments.length;
+
+                iterations++;
+                if (iterations >= maxIterations) {
+                    Logger.info('extractor-tiktok', 'Stop by iteration cap', { maxIterations });
+                    break;
+                }
             }
 
-            console.log(`成功提取${comments.length}条TikTok评论（包含回复）`);
+            Logger.info('extractor-tiktok', 'Extraction done', { count: comments.length });
 
             if (comments.length === 0) {
                 throw new Error('未能提取到任何有效评论内容');
@@ -83,6 +91,7 @@ class TikTokExtractor extends BaseExtractor {
             return comments.slice(0, maxComments);
 
         } catch (error) {
+            Logger.error('extractor-tiktok', 'Extract failed', error);
             throw new Error(`TikTok评论提取失败: ${error.message}`);
         }
     }
@@ -96,14 +105,14 @@ class TikTokExtractor extends BaseExtractor {
                 const toggles = this.findReplyToggleButtons();
                 if (toggles.length === 0) break;
 
-                console.log(`展开回复第 ${round + 1} 轮，目标按钮 ${toggles.length} 个`);
+            Logger.debug('extractor-tiktok', 'Expand replies round', { round: round + 1, targets: toggles.length });
 
                 for (const toggle of toggles) {
                     try {
                         this.robustClick(toggle);
                         clickedAny = true;
                     } catch (error) {
-                        console.warn('展开回复点击失败:', error);
+                        Logger.warn('extractor-tiktok', 'Expand replies click failed', error);
                     }
                 }
 
@@ -112,7 +121,7 @@ class TikTokExtractor extends BaseExtractor {
 
             return clickedAny;
         } catch (error) {
-            console.warn('展开回复过程出错:', error);
+            Logger.warn('extractor-tiktok', 'Expand replies error', error);
             return false;
         }
     }
@@ -205,7 +214,7 @@ class TikTokExtractor extends BaseExtractor {
             const idString = `${parentId}_${author}_${text.substring(0, 80)}_${timestamp}`;
             const id = CommonUtils.generateStableId(idString);
             
-            console.log(`提取到评论: ${author} - ${text.substring(0, 30)}... (${likes} 赞) [parentId: ${parentId}]`);
+            Logger.debug('extractor-tiktok', 'Comment extracted', { author, likes, parentId });
 
             return {
                 id,
@@ -218,7 +227,7 @@ class TikTokExtractor extends BaseExtractor {
                 url: window.location.href
             };
         } catch (error) {
-            console.warn('提取评论数据失败:', error);
+            Logger.warn('extractor-tiktok', 'Extract comment failed', error);
             return null;
         }
     }
@@ -349,7 +358,7 @@ class TikTokExtractor extends BaseExtractor {
                     this.robustClick(toggle);
                     await this.delay(300);
                 } catch (error) {
-                    console.warn('展开回复失败:', error);
+                    Logger.warn('extractor-tiktok', 'Expand reply failed', error);
                 }
             }
             // 等待DOM更新

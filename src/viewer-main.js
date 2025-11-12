@@ -27,11 +27,20 @@ class CommentInsightViewer {
             this.currentView = viewType;
 
             this.initializeEventListeners();
+            try {
+                chrome.runtime.sendMessage({ action: 'getConfig' }, (resp) => {
+                    if (resp && resp.success && resp.data) {
+                        const logging = resp.data.logging || { enabled: true, level: 'info' };
+                        Logger.enable(logging.enabled !== false);
+                        Logger.setLevel(logging.level || 'info');
+                    }
+                });
+            } catch (_) {}
             await this.loadData(dataKey);
             this.switchView(viewType);
 
         } catch (error) {
-            console.error('初始化查看器失败:', error);
+            Logger.error('viewer', 'Init viewer failed', error);
             this.showNotification('初始化失败: ' + error.message, 'error');
         }
     }
@@ -87,27 +96,27 @@ class CommentInsightViewer {
                     history: response.success ? (response.data || []) : [] 
                 };
             } else if (dataKey) {
-                console.log('Viewer加载数据，dataKey:', dataKey);
+                Logger.debug('viewer', 'Load data', { dataKey });
                 const response = await this.sendMessage({
                     action: 'loadData',
                     key: `comments_${dataKey}`
                 });
 
-                console.log('Viewer收到响应:', response.success, '数据:', response.data);
+                Logger.debug('viewer', 'Load response', { success: response.success });
                 
                 if (response.success && response.data) {
                     this.currentData = response.data;
-                    console.log('设置currentData，评论数量:', this.currentData.comments?.length || 0);
+                    Logger.info('viewer', 'Set currentData', { count: this.currentData.comments?.length || 0 });
                     this.views.comments.setComments(this.currentData.comments || []);
                     this.updateVideoTitle();
                 } else {
-                    console.warn('加载数据失败或无数据');
+                    Logger.warn('viewer', 'Load data failed or empty');
                     this.currentData = { comments: [], analysis: null };
                 }
             }
 
         } catch (error) {
-            console.error('加载数据失败:', error);
+            Logger.error('viewer', 'Load data failed', error);
             this.showNotification('加载数据失败: ' + error.message, 'error');
         } finally {
             this.showLoading(false);
@@ -173,7 +182,7 @@ class CommentInsightViewer {
             
             this.views.history.render();
         } catch (error) {
-            console.error('加载历史数据失败:', error);
+            Logger.error('viewer', 'Load history failed', error);
             this.showNotification('加载历史数据失败: ' + error.message, 'error');
         } finally {
             this.showLoading(false);
@@ -216,7 +225,7 @@ class CommentInsightViewer {
             }
 
         } catch (error) {
-            console.error('导出失败:', error);
+            Logger.error('viewer', 'Export failed', error);
             this.showNotification('导出失败: ' + error.message, 'error');
         }
     }
@@ -302,6 +311,5 @@ class CommentInsightViewer {
 
 // 创建全局实例
 window.viewer = new CommentInsightViewer();
-console.log('🚀 CommentInsight Viewer 已初始化');
-console.log('💡 提示：在控制台中使用 window.viewer 访问实例');
+Logger.info('viewer', 'CommentInsight Viewer initialized');
 

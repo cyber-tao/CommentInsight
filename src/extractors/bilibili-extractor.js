@@ -29,7 +29,7 @@ class BilibiliExtractor extends BaseExtractor {
     }
     async extract(config) {
         try {
-            console.log('开始提取Bilibili评论（支持Shadow DOM）');
+            Logger.info('extractor-bilibili', 'Start extracting Bilibili comments (Shadow DOM)');
             
             // 保存配置供其他方法使用
             this.config = config;
@@ -47,12 +47,11 @@ class BilibiliExtractor extends BaseExtractor {
             const comments = await this.extractShadowComments();
 
             this.pingProgress('done', { count: comments.length });
-
-            console.log(`成功提取Bilibili评论: ${comments.length}条`);
+            Logger.info('extractor-bilibili', 'Bilibili comments extracted', { count: comments.length });
             return comments;
 
         } catch (error) {
-            console.error('Bilibili评论提取失败:', error);
+            Logger.error('extractor-bilibili', 'Failed to extract Bilibili comments', error);
             throw error;
         }
     }
@@ -69,11 +68,11 @@ class BilibiliExtractor extends BaseExtractor {
             try {
                 const element = await this.waitForElement(selector, 3000);
                 if (element) {
-                    console.log(`找到评论主容器: ${selector}`);
+                    Logger.info('extractor-bilibili', 'Found comment container', { selector });
                     return element;
                 }
             } catch (e) {
-                console.log(`选择器 ${selector} 未找到评论容器`);
+                Logger.debug('extractor-bilibili', 'Container not found for selector', { selector });
                 continue;
             }
         }
@@ -82,26 +81,28 @@ class BilibiliExtractor extends BaseExtractor {
     }
 
     async scrollToLoadMoreShadow() {
-        console.log('开始滚动加载更多评论...');
+        Logger.info('extractor-bilibili', 'Start scrolling to load more comments');
 
         let lastCommentCount = 0;
         let stableIterations = 0;
         let scrollCount = 0;
 
+        let iterations = 0;
+        const maxIterations = 60;
         while (true) {
             window.scrollTo(0, document.documentElement.scrollHeight);
             await this.delay(1500);
 
             const currentCommentCount = this.getCurrentShadowCommentCount();
             scrollCount++;
-            console.log(`第${scrollCount}次滚动，当前评论数: ${currentCommentCount}`);
+            Logger.debug('extractor-bilibili', 'Scroll iteration', { scroll: scrollCount, current: currentCommentCount });
             this.pingProgress('scroll', { scroll: scrollCount, current: currentCommentCount });
 
             // 检查是否有新评论加载
             if (currentCommentCount === lastCommentCount) {
                 stableIterations++;
                 if (stableIterations >= 3) {
-                    console.log('连续3次滚动没有新评论加载，停止滚动');
+                    Logger.info('extractor-bilibili', 'Stop scrolling by stability');
                     break;
                 }
             } else {
@@ -110,7 +111,7 @@ class BilibiliExtractor extends BaseExtractor {
             }
         }
 
-        console.log(`滚动完成，共找到 ${lastCommentCount} 个评论线程`);
+        Logger.info('extractor-bilibili', 'Scroll completed', { threads: lastCommentCount });
     }
 
     getCurrentShadowCommentCount() {
@@ -130,38 +131,38 @@ class BilibiliExtractor extends BaseExtractor {
 
     async extractShadowComments() {
         const comments = [];
-        console.log('开始从 Shadow DOM 提取评论（使用精确结构）...');
+        Logger.info('extractor-bilibili', 'Start Shadow DOM extraction');
 
         try {
             // 1. 找到主评论应用容器
             const commentApp = document.querySelector('#commentapp');
             if (!commentApp) {
-                console.log('未找到 #commentapp 容器');
+                Logger.debug('extractor-bilibili', 'No #commentapp container');
                 return await this.fallbackExtractComments();
             }
 
             // 2. 找到 bili-comments 组件
             const biliComments = commentApp.querySelector('bili-comments');
             if (!biliComments) {
-                console.log('未找到 bili-comments 组件');
+                Logger.debug('extractor-bilibili', 'No bili-comments');
                 return await this.fallbackExtractComments();
             }
 
             // 3. 检查 bili-comments 的 shadowRoot
             const biliCommentsRoot = biliComments.shadowRoot;
             if (!biliCommentsRoot) {
-                console.log('bili-comments 没有 shadowRoot');
+                Logger.debug('extractor-bilibili', 'bili-comments has no shadowRoot');
                 return await this.fallbackExtractComments();
             }
 
-            console.log('找到 bili-comments shadowRoot');
+            Logger.info('extractor-bilibili', 'Found bili-comments shadowRoot');
 
             // 4. 查找所有评论线程
             const commentThreads = biliCommentsRoot.querySelectorAll('bili-comment-thread-renderer');
-            console.log(`找到 ${commentThreads.length} 个评论线程`);
+            Logger.info('extractor-bilibili', 'Found comment threads', { count: commentThreads.length });
 
             if (commentThreads.length === 0) {
-                console.log('未找到评论线程，尝试替代方法');
+                Logger.info('extractor-bilibili', 'No threads found, fallback');
                 return await this.fallbackExtractComments();
             }
 
@@ -171,7 +172,7 @@ class BilibiliExtractor extends BaseExtractor {
             // 5. 从上到下遍历每个评论线程，提取主评论和回复
             for (let i = 0; i < commentThreads.length; i++) {
                 if (comments.length >= maxComments) {
-                    console.log(`已达到最大评论数 ${maxComments}，停止提取`);
+                    Logger.info('extractor-bilibili', 'Reached max comments, stop', { maxComments });
                     break;
                 }
 
@@ -193,7 +194,7 @@ class BilibiliExtractor extends BaseExtractor {
                     const comment = this.extractFromMainElement(mainElement, i);
                     if (comment) {
                         comments.push(comment);
-                        console.log(`[${comments.length}/${maxComments}] 提取主评论: ${comment.author} - ${comment.text.substring(0, 30)}...`);
+                        Logger.debug('extractor-bilibili', 'Top comment extracted', { collected: comments.length, max: maxComments });
                         this.pingProgress('top-comment', { index: i + 1, total: commentThreads.length, collected: comments.length });
 
                         // 如果还有配额，展开并提取该评论的回复
@@ -203,7 +204,7 @@ class BilibiliExtractor extends BaseExtractor {
                                 const remaining = maxComments - comments.length;
                                 const replies = this.extractRepliesFromThread(threadRoot, comment.id, remaining);
                                 if (Array.isArray(replies) && replies.length > 0) {
-                                    console.log(`  ↳ 获取到 ${replies.length} 条回复`);
+                                    Logger.debug('extractor-bilibili', 'Replies extracted', { replies: replies.length });
                                     comments.push(...replies);
                                     this.pingProgress('replies', { index: i + 1, replies: replies.length, totalCollected: comments.length });
                                 }
@@ -214,16 +215,16 @@ class BilibiliExtractor extends BaseExtractor {
                         await this.delay(600 + Math.floor(Math.random() * 700));
                     }
                 } catch (error) {
-                    console.warn(`提取第${i + 1}条评论失败:`, error.message);
+                    Logger.warn('extractor-bilibili', 'Failed extracting comment', { index: i + 1, message: error.message });
                 }
             }
 
         } catch (error) {
-            console.error('Shadow DOM 评论提取失败:', error);
+            Logger.error('extractor-bilibili', 'Shadow extraction failed', error);
             return await this.fallbackExtractComments();
         }
 
-        console.log(`Shadow DOM 提取完成，共 ${comments.length} 条评论（含回复）`);
+        Logger.info('extractor-bilibili', 'Shadow extraction completed', { count: comments.length });
         return comments;
     }
 
@@ -232,7 +233,7 @@ class BilibiliExtractor extends BaseExtractor {
 			// replies 容器在 threadRoot 内，但“点击查看”在 bili-comment-replies-renderer 的 shadowRoot
 			const repliesComponent = threadRoot.querySelector('bili-comment-replies-renderer');
 			if (!repliesComponent || !repliesComponent.shadowRoot) {
-				console.log('[Bili] 未找到 bili-comment-replies-renderer 或其 shadowRoot');
+                Logger.debug('extractor-bilibili', 'Replies renderer not found');
 				return false;
 			}
 			const repRoot = repliesComponent.shadowRoot;
@@ -296,7 +297,7 @@ class BilibiliExtractor extends BaseExtractor {
 				const b = btns[0];
 				const label = (b.textContent || '').trim();
 				const before = getLoadedCount();
-				console.log(`[Bili] 展开回复(尝试${attempt + 1})：点击 "${label}"`);
+                Logger.debug('extractor-bilibili', 'Expand replies click', { attempt: attempt + 1, label });
 				robustClick(b);
 				const after = await waitForIncrease(before, 4500);
 				if (after > before) {
@@ -315,11 +316,11 @@ class BilibiliExtractor extends BaseExtractor {
 			}
 
 			const loadedAfter = getLoadedCount();
-			console.log(`[Bili] 回复展开完成：预期=${expectedFromLabel ?? '未知'}，新增=${loadedAfter - loadedBefore}，当前已渲染=${loadedAfter}，点击次数=${totalClicks}`);
+            Logger.info('extractor-bilibili', 'Replies expansion done', { expected: expectedFromLabel ?? 'unknown', added: loadedAfter - loadedBefore, loaded: loadedAfter, clicks: totalClicks });
 
 			return loadedAfter > loadedBefore;
 		} catch (e) {
-			console.warn('展开B站回复失败:', e);
+            Logger.warn('extractor-bilibili', 'Expand replies failed', e);
 			return false;
 		}
     }
@@ -333,7 +334,7 @@ class BilibiliExtractor extends BaseExtractor {
 
             // 每条回复
             const replyItems = repliesRoot.querySelectorAll('bili-comment-reply-renderer');
-            console.log(`[Bili] 解析到回复条目: ${replyItems.length}，最多提取: ${maxCount}`);
+            Logger.debug('extractor-bilibili', 'Reply items parsed', { items: replyItems.length, maxCount });
             
             for (let i = 0; i < replyItems.length && results.length < maxCount; i++) {
                 const reply = replyItems[i];
@@ -393,15 +394,15 @@ class BilibiliExtractor extends BaseExtractor {
                     url: window.location.href
                 });
             }
-            console.log(`[Bili] 已组装回复: ${results.length}`);
+            Logger.debug('extractor-bilibili', 'Replies assembled', { count: results.length });
         } catch (e) {
-            console.warn('提取B站回复失败:', e);
+            Logger.warn('extractor-bilibili', 'Extract replies failed', e);
         }
         return results;
     }
     extractFromMainElement(mainElement, index) {
         try {
-            console.log(`开始从 #main 元素提取第${index + 1}条评论...`);
+            Logger.debug('extractor-bilibili', 'Extract from #main', { index: index + 1 });
 
             // 提取用户名
             let author = '匿名用户';
@@ -479,13 +480,13 @@ class BilibiliExtractor extends BaseExtractor {
             };
 
         } catch (error) {
-            console.error(`从 #main 元素提取评论失败:`, error);
+            Logger.error('extractor-bilibili', 'Extract from #main failed', error);
             return null;
         }
     }
 
     async fallbackExtractComments() {
-        console.log('尝试传统方法提取评论...');
+        Logger.info('extractor-bilibili', 'Fallback to traditional extraction');
         const comments = [];
 
         const commentSelectors = [
@@ -502,7 +503,7 @@ class BilibiliExtractor extends BaseExtractor {
             try {
                 commentElements = document.querySelectorAll(selector);
                 if (commentElements.length > 0) {
-                    console.log(`传统方法使用选择器: ${selector}, 找到评论: ${commentElements.length}条`);
+                    Logger.info('extractor-bilibili', 'Fallback selector used', { selector, count: commentElements.length });
                     usedSelector = selector;
                     break;
                 }
@@ -512,7 +513,7 @@ class BilibiliExtractor extends BaseExtractor {
         }
 
         if (commentElements.length === 0) {
-            console.warn('传统方法也找不到评论元素');
+            Logger.warn('extractor-bilibili', 'Fallback found no comment elements');
             return comments;
         }
 
@@ -524,11 +525,11 @@ class BilibiliExtractor extends BaseExtractor {
                     comments.push(comment);
                 }
             } catch (error) {
-                console.warn(`传统方法提取第${i + 1}条评论失败:`, error.message);
+                Logger.warn('extractor-bilibili', 'Fallback comment extract failed', { index: i + 1, message: error.message });
             }
         }
 
-        console.log(`传统方法成功提取 ${comments.length} 条有效评论`);
+        Logger.info('extractor-bilibili', 'Fallback extraction completed', { count: comments.length });
         return comments;
     }
 
@@ -570,4 +571,3 @@ class BilibiliExtractor extends BaseExtractor {
 if (typeof window !== 'undefined') {
     window.BilibiliExtractor = BilibiliExtractor;
 }
-
